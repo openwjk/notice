@@ -52,10 +52,10 @@ public class ScheduleTodayReminderImpl implements ScheduledService {
 
     private String buildMessage(Date date) {
         List<String> lines = new ArrayList<String>();
-        lines.add("\u4eca\u5929: " + DateUtil.formatDate(date, DateUtil.FORMAT_DATE_NORMAL));
-        lines.add("\u661f\u671f: " + formatWeekday(date));
-        lines.addAll(fetchBaiduSnippets("\u4eca\u5929", "\u4eca\u65e5\u4fe1\u606f"));
-        lines.addAll(fetchBaiduSnippets("\u5929\u6c14", "\u5929\u6c14\u4fe1\u606f"));
+        lines.add("今天: " + DateUtil.formatDate(date, DateUtil.FORMAT_DATE_NORMAL));
+        lines.add("星期: " + formatWeekday(date));
+        lines.addAll(fetchBaiduSnippets("今天", "今日信息"));
+        lines.addAll(fetchBaiduSnippets("天气", "天气信息"));
         return String.join("\n", lines);
     }
 
@@ -86,7 +86,7 @@ public class ScheduleTodayReminderImpl implements ScheduledService {
             }
         } catch (Exception ex) {
             log.warn("Failed to fetch Baidu page for keyword '{}'.", keyword, ex);
-            snippets.add(title + ": \u7f51\u9875\u83b7\u53d6\u5931\u8d25");
+            snippets.add(title + ": 网页获取失败");
         }
         return snippets;
     }
@@ -110,13 +110,13 @@ public class ScheduleTodayReminderImpl implements ScheduledService {
         Calendar calendar = Calendar.getInstance();
         calendar.setTime(date);
         String[] weekdays = {
-                "\u661f\u671f\u65e5",
-                "\u661f\u671f\u4e00",
-                "\u661f\u671f\u4e8c",
-                "\u661f\u671f\u4e09",
-                "\u661f\u671f\u56db",
-                "\u661f\u671f\u4e94",
-                "\u661f\u671f\u516d"
+                "星期日",
+                "星期一",
+                "星期二",
+                "星期三",
+                "星期四",
+                "星期五",
+                "星期六"
         };
         return weekdays[calendar.get(Calendar.DAY_OF_WEEK) - 1];
     }
