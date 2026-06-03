@@ -99,11 +99,12 @@ notice
 
 必填：
 
-| 环境变量 | 说明 |
-| --- | --- |
-| `GITHUB_TOKEN` | GitHub token。 |
+| 环境变量 | 说明|
+| --- |------------------------------------------------------------------|
+| `GITHUB_TOKEN` | GitHub token。|
 | `GITHUB_API_URL` | GitHub API 或仓库地址，例如 `https://github.com/openwjk/cli-config.git`。 |
-| `WECOM_WEBHOOK_URL` | 企业微信机器人 webhook 地址。 |
+| `WECOM_WEBHOOK_URL` | 企业微信机器人 webhook 地址。|
+| `AMAP_KEY` | 高德地图 API key。|
 
 可选：
 
