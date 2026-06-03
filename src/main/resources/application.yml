@@ -29,7 +29,7 @@ festival:
   timeout-ms: ${FESTIVAL_TIMEOUT_MS:10000}
 
 amap:
-  key: ${AMAP_KEY:000cc2385ce54d5818f908d4b2a06d9a}
+  key: ${AMAP_KEY:}
   city: ${AMAP_CITY:310000}
   timeout-ms: ${AMAP_TIMEOUT_MS:10000}
 
