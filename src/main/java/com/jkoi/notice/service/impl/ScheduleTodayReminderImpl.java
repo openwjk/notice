@@ -1,36 +1,50 @@
 package com.jkoi.notice.service.impl;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jkoi.notice.client.WeComWebhookClient;
 import com.jkoi.notice.service.ScheduledService;
-import com.jkoi.notice.util.DateUtil;
-import org.jsoup.Jsoup;
-import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
-import org.jsoup.select.Elements;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestTemplate;
 
-import java.io.IOException;
 import java.net.URLEncoder;
-import java.util.ArrayList;
-import java.util.Calendar;
+import java.nio.charset.StandardCharsets;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Date;
-import java.util.List;
 
 @Service
 public class ScheduleTodayReminderImpl implements ScheduledService {
 
     private static final Logger log = LoggerFactory.getLogger(ScheduleTodayReminderImpl.class);
-    private static final int TIMEOUT_MS = 10000;
-    private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            + "(KHTML, like Gecko) Chrome/125.0 Safari/537.36";
+    private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final String AMAP_WEATHER_URL = "https://restapi.amap.com/v3/weather/weatherInfo";
 
     private final WeComWebhookClient weComWebhookClient;
+    private final ObjectMapper objectMapper;
+    private final String amapKey;
+    private final String amapCity;
+    private final int timeoutMs;
 
-    public ScheduleTodayReminderImpl(WeComWebhookClient weComWebhookClient) {
+    public ScheduleTodayReminderImpl(WeComWebhookClient weComWebhookClient,
+                                     ObjectMapper objectMapper,
+                                     @Value("${amap.key:}") String amapKey,
+                                     @Value("${amap.city:310000}") String amapCity,
+                                     @Value("${amap.timeout-ms:10000}") int timeoutMs) {
         this.weComWebhookClient = weComWebhookClient;
+        this.objectMapper = objectMapper;
+        this.amapKey = amapKey;
+        this.amapCity = amapCity;
+        this.timeoutMs = timeoutMs;
     }
 
     @Override
@@ -51,73 +65,138 @@ public class ScheduleTodayReminderImpl implements ScheduledService {
     }
 
     private String buildMessage(Date date) {
-        List<String> lines = new ArrayList<String>();
-        lines.add("今天: " + DateUtil.formatDate(date, DateUtil.FORMAT_DATE_NORMAL));
-        lines.add("星期: " + formatWeekday(date));
-        lines.addAll(fetchBaiduSnippets("今天", "今日信息"));
-        lines.addAll(fetchBaiduSnippets("天气", "天气信息"));
-        return String.join("\n", lines);
+        LocalDate today = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+        StringBuilder builder = new StringBuilder();
+        builder.append("今天: ").append(today.format(DATE_FORMAT)).append("\n");
+        builder.append("星期: ").append(formatWeekday(today.getDayOfWeek()));
+
+        String weather = fetchAmapLiveWeather();
+        if (StringUtils.hasText(weather)) {
+            builder.append("\n").append(weather);
+        }
+        return builder.toString();
     }
 
-    private List<String> fetchBaiduSnippets(String keyword, String title) {
-        List<String> snippets = new ArrayList<String>();
+    private String fetchAmapLiveWeather() {
+        if (!StringUtils.hasText(amapKey)) {
+            log.warn("Missing AMAP_KEY, skip AMap weather query.");
+            return "天气: 未配置高德 API Key";
+        }
+
         try {
-            Document document = Jsoup.connect(buildBaiduSearchUrl(keyword))
-                    .userAgent(USER_AGENT)
-                    .timeout(TIMEOUT_MS)
-                    .ignoreHttpErrors(true)
-                    .get();
-
-            Elements resultBlocks = document.select("#content_left .result, #content_left .c-container");
-            for (Element block : resultBlocks) {
-                String text = cleanup(block.text());
-                if (StringUtils.hasText(text)) {
-                    snippets.add(title + ": " + limit(text, 120));
-                }
-                if (snippets.size() >= 2) {
-                    break;
-                }
+            String url = AMAP_WEATHER_URL
+                    + "?key=" + urlEncode(amapKey)
+                    + "&city=" + urlEncode(amapCity)
+                    + "&extensions=base";
+            ResponseEntity<String> response = createRestTemplate().getForEntity(url, String.class);
+            String body = response.getBody();
+            if (!StringUtils.hasText(body)) {
+                return "天气: 高德接口返回为空";
             }
-            if (snippets.isEmpty()) {
-                String bodyText = cleanup(document.body() == null ? "" : document.body().text());
-                if (StringUtils.hasText(bodyText)) {
-                    snippets.add(title + ": " + limit(bodyText, 120));
-                }
-            }
+            return parseAmapLiveWeather(body);
+        } catch (ResourceAccessException ex) {
+            log.warn("Failed to fetch AMap weather. Cause: {}", getRootCauseMessage(ex));
+            return "天气: 高德接口访问失败";
         } catch (Exception ex) {
-            log.warn("Failed to fetch Baidu page for keyword '{}'.", keyword, ex);
-            snippets.add(title + ": 网页获取失败");
+            log.warn("Failed to parse AMap weather response.", ex);
+            return "天气: 高德接口解析失败";
         }
-        return snippets;
     }
 
-    private String buildBaiduSearchUrl(String keyword) throws IOException {
-        return "https://www.baidu.com/s?wd=" + URLEncoder.encode(keyword, "UTF-8");
-    }
-
-    private String cleanup(String value) {
-        return value == null ? "" : value.replaceAll("\\s+", " ").trim();
-    }
-
-    private String limit(String value, int maxLength) {
-        if (value.length() <= maxLength) {
-            return value;
+    private String parseAmapLiveWeather(String body) throws Exception {
+        JsonNode root = objectMapper.readTree(body);
+        if (!"1".equals(root.path("status").asText())) {
+            String info = root.path("info").asText("未知错误");
+            return "天气: 高德接口返回失败 - " + info;
         }
-        return value.substring(0, maxLength) + "...";
+
+        JsonNode lives = root.path("lives");
+        if (!lives.isArray() || lives.size() == 0) {
+            return "天气: 高德接口未返回实时天气";
+        }
+
+        JsonNode live = lives.get(0);
+        String province = live.path("province").asText("");
+        String city = live.path("city").asText("");
+        String weather = live.path("weather").asText("");
+        String temperature = live.path("temperature").asText("");
+        String windDirection = live.path("winddirection").asText("");
+        String windPower = live.path("windpower").asText("");
+        String humidity = live.path("humidity").asText("");
+        String reportTime = live.path("reporttime").asText("");
+
+        StringBuilder builder = new StringBuilder("天气: ");
+//        appendWithSpace(builder, province);
+//        appendWithSpace(builder, city);
+        appendWithSpace(builder, weather);
+        if (StringUtils.hasText(temperature)) {
+            builder.append(temperature).append("°C ");
+        }
+        if (StringUtils.hasText(humidity)) {
+            builder.append("湿度").append(humidity).append("% ");
+        }
+        if (StringUtils.hasText(windDirection) || StringUtils.hasText(windPower)) {
+            builder.append("风力");
+            if (StringUtils.hasText(windDirection)) {
+                builder.append(windDirection).append("风");
+            }
+            if (StringUtils.hasText(windPower)) {
+                builder.append(windPower).append("级");
+            }
+            builder.append(" ");
+        }
+//        if (StringUtils.hasText(reportTime)) {
+//            builder.append("发布时间: ").append(reportTime);
+//        }
+        return builder.toString().trim();
     }
 
-    private String formatWeekday(Date date) {
-        Calendar calendar = Calendar.getInstance();
-        calendar.setTime(date);
-        String[] weekdays = {
-                "星期日",
-                "星期一",
-                "星期二",
-                "星期三",
-                "星期四",
-                "星期五",
-                "星期六"
-        };
-        return weekdays[calendar.get(Calendar.DAY_OF_WEEK) - 1];
+    private void appendWithSpace(StringBuilder builder, String value) {
+        if (StringUtils.hasText(value)) {
+            builder.append(value).append(" ");
+        }
+    }
+
+    private RestTemplate createRestTemplate() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(timeoutMs);
+        factory.setReadTimeout(timeoutMs);
+        return new RestTemplate(factory);
+    }
+
+    private String urlEncode(String value) {
+        try {
+            return URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20");
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("Failed to encode AMap query value.", ex);
+        }
+    }
+
+    private String getRootCauseMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current.getClass().getSimpleName() + ": " + current.getMessage();
+    }
+
+    private String formatWeekday(DayOfWeek dayOfWeek) {
+        switch (dayOfWeek) {
+            case MONDAY:
+                return "星期一";
+            case TUESDAY:
+                return "星期二";
+            case WEDNESDAY:
+                return "星期三";
+            case THURSDAY:
+                return "星期四";
+            case FRIDAY:
+                return "星期五";
+            case SATURDAY:
+                return "星期六";
+            case SUNDAY:
+            default:
+                return "星期日";
+        }
     }
 }
