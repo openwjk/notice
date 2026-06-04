@@ -96,9 +96,6 @@ public class GitHubNoticeScheduler {
         if ((cronNode == null || cronNode.isNull()) && !"cron".equals(noticeProperties.getCronField())) {
             cronNode = node.get("cron");
         }
-        if ((cronNode == null || cronNode.isNull()) && !"corn".equals(noticeProperties.getCronField())) {
-            cronNode = node.get("corn");
-        }
         return cronNode == null || cronNode.isNull() ? "" : cronNode.asText();
     }
 

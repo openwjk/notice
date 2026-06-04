@@ -28,10 +28,11 @@ festival:
   calendar-url: ${FESTIVAL_CALENDAR_URL:https://ical.muhan.org}
   timeout-ms: ${FESTIVAL_TIMEOUT_MS:10000}
 
-amap:
-  key: ${AMAP_KEY:}
-  city: ${AMAP_CITY:310000}
-  timeout-ms: ${AMAP_TIMEOUT_MS:10000}
+tencent:
+  key: ${TENCENT_KEY:}
+  secret-key: ${TENCENT_SECRET_KEY:}
+  adcode: ${TENCENT_ADCODE:310115}
+  timeout-ms: ${TENCENT_TIMEOUT_MS:10000}
 
 logging:
   level:
