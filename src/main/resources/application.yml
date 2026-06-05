@@ -34,6 +34,10 @@ tencent:
   adcode: ${TENCENT_ADCODE:310115}
   timeout-ms: ${TENCENT_TIMEOUT_MS:10000}
 
+hk:
+  lunardate-url: https://data.weather.gov.hk/weatherAPI/opendata/lunardate.php?date=
+
+
 logging:
   level:
     com.example.notice: INFO

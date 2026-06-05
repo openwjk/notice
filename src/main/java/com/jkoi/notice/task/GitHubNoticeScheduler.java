@@ -125,7 +125,7 @@ public class GitHubNoticeScheduler {
                 String exeCode = exeNode.asText();
                 ZonedDateTime zdt = taskStartedAt.atZone(ZoneId.systemDefault()); // 指定时区
                 Date date = Date.from(zdt.toInstant());
-                scheduledFactory.getScheduledService(exeCode).execute(date);
+                scheduledFactory.getScheduledService(exeCode).execute(date, item);
             } else {
                 JsonNode dataNode = item.get(noticeProperties.getDataField());
                 if (dataNode == null || dataNode.isNull()) {

@@ -73,7 +73,7 @@ public class ScheduleTodayReminderImpl implements ScheduledService {
     }
 
     @Override
-    public void execute(Date date) {
+    public void execute(Date date, JsonNode node) {
         try {
             String message = buildMessage(date == null ? new Date() : date);
             if (StringUtils.hasText(message)) {

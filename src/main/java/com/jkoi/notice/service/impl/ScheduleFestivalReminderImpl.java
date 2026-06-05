@@ -1,5 +1,6 @@
 package com.jkoi.notice.service.impl;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.jkoi.notice.client.WeComWebhookClient;
 import com.jkoi.notice.service.ScheduledService;
 import org.slf4j.Logger;
@@ -53,7 +54,7 @@ public class ScheduleFestivalReminderImpl implements ScheduledService {
     }
 
     @Override
-    public void execute(Date date) {
+    public void execute(Date date, JsonNode node) {
         try {
             String message = buildMessage(date == null ? new Date() : date);
             if (StringUtils.hasText(message)) {
