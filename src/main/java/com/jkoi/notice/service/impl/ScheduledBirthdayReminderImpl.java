@@ -86,6 +86,8 @@ public class ScheduledBirthdayReminderImpl implements ScheduledService {
                 names.add(name);
             }
         }
+        if (names.isEmpty())
+            return null;
         return String.format(VERBAL_TRICK, String.join(",", names));
     }
 
