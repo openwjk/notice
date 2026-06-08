@@ -141,8 +141,4 @@ public class DateUtil {
             return false;
         }
     }
-
-    static {
-        System.setProperty("user.timezone", "Etc/GMT-8");
-    }
 }
