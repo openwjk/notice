@@ -59,7 +59,8 @@ public class GitHubNoticeScheduler {
         }
 
         try {
-            String payload = gitHubClient.fetch();
+
+            String payload = gitHubClient.fetch(0);
             JsonNode root = objectMapper.readTree(payload);
             List<String> contents = collectMatchedData(root, taskStartedAt);
             if (contents.isEmpty()) {

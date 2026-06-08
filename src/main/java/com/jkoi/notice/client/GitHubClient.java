@@ -1,5 +1,7 @@
 package com.jkoi.notice.client;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jkoi.notice.config.GitHubProperties;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -19,29 +21,40 @@ import java.util.Base64;
 public class GitHubClient {
 
     private final GitHubProperties properties;
+    private final WeComWebhookClient weComWebhookClient;
 
-    public GitHubClient(GitHubProperties properties) {
+    public GitHubClient(GitHubProperties properties, WeComWebhookClient weComWebhookClient) {
         this.properties = properties;
+        this.weComWebhookClient = weComWebhookClient;
     }
 
-    public String fetch() {
-        RestTemplate restTemplate = createRestTemplate(properties.getTimeoutMs());
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("Accept", properties.getAccept());
-        headers.set("X-GitHub-Api-Version", properties.getApiVersion());
-        headers.set("User-Agent", "notice");
-        headers.setBearerAuth(properties.getToken());
+    public String fetch(int count) {
+        String responseBody = "";
+        try {
+            RestTemplate restTemplate = createRestTemplate(properties.getTimeoutMs());
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Accept", properties.getAccept());
+            headers.set("X-GitHub-Api-Version", properties.getApiVersion());
+            headers.set("User-Agent", "notice");
+            headers.setBearerAuth(properties.getToken());
 
-        ResponseEntity<String> response = restTemplate.exchange(
-                resolveApiUrl(),
-                HttpMethod.GET,
-                new HttpEntity<String>(headers),
-                String.class
-        );
-        String responseBody = response.getBody() == null ? "" : response.getBody();
-        if (StringUtils.hasText(properties.getFilePath())) {
-            return decodeContentApiResponse(responseBody);
+            ResponseEntity<String> response = restTemplate.exchange(
+                    resolveApiUrl(),
+                    HttpMethod.GET,
+                    new HttpEntity<String>(headers),
+                    String.class
+            );
+            responseBody = response.getBody() == null ? "" : response.getBody();
+            if (StringUtils.hasText(properties.getFilePath())) {
+                return decodeContentApiResponse(responseBody);
+            }
+        }catch (Exception e) {
+            if(count<10)
+                return fetch(count+1);
+            else
+                weComWebhookClient.sendText("Failed to fetch GitHub content. Please check your GitHub token and API URL.");
         }
+
         return responseBody;
     }
 
@@ -106,8 +119,8 @@ public class GitHubClient {
 
     private String decodeContentApiResponse(String responseBody) {
         try {
-            com.fasterxml.jackson.databind.JsonNode node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(responseBody);
-            com.fasterxml.jackson.databind.JsonNode content = node.get("content");
+            JsonNode node = new ObjectMapper().readTree(responseBody);
+            JsonNode content = node.get("content");
             if (content == null || !StringUtils.hasText(content.asText())) {
                 return responseBody;
             }
