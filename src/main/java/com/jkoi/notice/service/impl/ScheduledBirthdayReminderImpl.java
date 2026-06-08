@@ -63,7 +63,7 @@ public class ScheduledBirthdayReminderImpl implements ScheduledService {
                 weComWebhookClient.sendText(message);
             }
         } catch (Exception ex) {
-            log.error("Failed to execute FESTIVAL_REMINDER.", ex);
+            log.error("Failed to execute BIRTHDAY_REMINDER.", ex);
         }
     }
 
