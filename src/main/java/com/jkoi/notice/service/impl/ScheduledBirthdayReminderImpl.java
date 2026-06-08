@@ -70,7 +70,7 @@ public class ScheduledBirthdayReminderImpl implements ScheduledService {
     private String buildMessage(Date date, JsonNode node) {
         LocalDate today = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
         JsonNode data = node.get("data");
-        if (!data.isArray())
+        if (data == null || !data.isArray())
             return null;
         String toDayStr = today.format(DATE_FORMAT);
         String lunarDate = getLunarDate(toDayStr);
@@ -94,7 +94,7 @@ public class ScheduledBirthdayReminderImpl implements ScheduledService {
     @SneakyThrows
     private String getLunarDate(String today) {
         int count = 0;
-        String lunarDateResp = requestHkLunarDate(today,count);
+        String lunarDateResp = requestHkLunarDate(today, count);
         if (lunarDateResp != null && !lunarDateResp.isEmpty()) {
             JsonNode root = objectMapper.readTree(lunarDateResp);
             return root.get("LunarDate") != null ? root.get("LunarDate").asText() : "";
