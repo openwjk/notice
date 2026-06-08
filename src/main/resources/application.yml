@@ -40,4 +40,4 @@ hk:
 
 logging:
   level:
-    com.example.notice: INFO
+    com.jkoi.notice: INFO

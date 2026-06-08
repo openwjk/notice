@@ -40,7 +40,7 @@ public class ScheduledFactory {
             return indexCodeService;
         } else {
             log.warn("ScheduledFactory.getScheduledService:null,origin code:{}", exeCode);
-            throw new IllegalArgumentException(String.format("current code not exist: [%s]", exeCode));
         }
+        return null;
     }
 }

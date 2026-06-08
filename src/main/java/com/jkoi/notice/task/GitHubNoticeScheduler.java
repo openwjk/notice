@@ -6,6 +6,7 @@ import com.jkoi.notice.config.NoticeProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jkoi.notice.service.ScheduledFactory;
+import com.jkoi.notice.service.ScheduledService;
 import org.quartz.CronExpression;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -126,7 +127,9 @@ public class GitHubNoticeScheduler {
                 String exeCode = exeNode.asText();
                 ZonedDateTime zdt = taskStartedAt.atZone(ZoneId.systemDefault()); // 指定时区
                 Date date = Date.from(zdt.toInstant());
-                scheduledFactory.getScheduledService(exeCode).execute(date, item);
+                ScheduledService scheduledService = scheduledFactory.getScheduledService(exeCode);
+                if (scheduledService != null)
+                    scheduledService.execute(date, item);
             } else {
                 JsonNode dataNode = item.get(noticeProperties.getDataField());
                 if (dataNode == null || dataNode.isNull()) {
