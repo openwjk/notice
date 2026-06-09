@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <springProperty scope="context" name="APP_LOG_LEVEL" source="logging.level.com.jkoi.notice" defaultValue="INFO"/>
+    <springProperty scope="context" name="LOG_FILE" source="logging.file.name" defaultValue="logs/notice.log"/>
+    <springProperty scope="context" name="LOG_FILE_CHARSET" source="logging.charset.file" defaultValue="UTF-8"/>
+    <springProperty scope="context" name="LOG_FILE_PATTERN" source="logging.logback.rollingpolicy.file-name-pattern" defaultValue="logs/notice.%d{yyyy-MM-dd}.log"/>
+    <springProperty scope="context" name="LOG_MAX_HISTORY" source="logging.logback.rollingpolicy.max-history" defaultValue="7"/>
+    <springProperty scope="context" name="LOG_TOTAL_SIZE_CAP" source="logging.logback.rollingpolicy.total-size-cap" defaultValue="1GB"/>
+    <springProperty scope="context" name="LOG_CLEAN_HISTORY_ON_START" source="logging.logback.rollingpolicy.clean-history-on-start" defaultValue="true"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            <charset>${CONSOLE_LOG_CHARSET}</charset>
+        </encoder>
+    </appender>
+
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_FILE}</file>
+        <encoder>
+            <pattern>${FILE_LOG_PATTERN}</pattern>
+            <charset>${LOG_FILE_CHARSET}</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_FILE_PATTERN}</fileNamePattern>
+            <maxHistory>${LOG_MAX_HISTORY}</maxHistory>
+            <totalSizeCap>${LOG_TOTAL_SIZE_CAP}</totalSizeCap>
+            <cleanHistoryOnStart>${LOG_CLEAN_HISTORY_ON_START}</cleanHistoryOnStart>
+        </rollingPolicy>
+    </appender>
+
+    <logger name="com.jkoi.notice" level="${APP_LOG_LEVEL}"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </root>
+</configuration>

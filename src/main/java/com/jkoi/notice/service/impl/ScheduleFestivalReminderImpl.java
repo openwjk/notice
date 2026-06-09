@@ -54,6 +54,16 @@ public class ScheduleFestivalReminderImpl implements ScheduledService {
     }
 
     @Override
+    public String getName() {
+        return "节假日闹钟开闭提醒";
+    }
+
+    @Override
+    public String getSample() {
+        return "{}";
+    }
+
+    @Override
     public void execute(Date date, JsonNode node) {
         try {
             String message = buildMessage(date == null ? new Date() : date);

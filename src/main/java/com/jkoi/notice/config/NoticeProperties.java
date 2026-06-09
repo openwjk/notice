@@ -10,7 +10,6 @@ public class NoticeProperties {
     private long initialDelayMs;
     private String cronField;
     private String dataField;
-    private boolean onChangeOnly;
     private int maxContentLength;
 
     public boolean isEnabled() {
@@ -51,14 +50,6 @@ public class NoticeProperties {
 
     public void setDataField(String dataField) {
         this.dataField = dataField;
-    }
-
-    public boolean isOnChangeOnly() {
-        return onChangeOnly;
-    }
-
-    public void setOnChangeOnly(boolean onChangeOnly) {
-        this.onChangeOnly = onChangeOnly;
     }
 
     public int getMaxContentLength() {

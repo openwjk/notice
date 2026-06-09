@@ -5,7 +5,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -42,5 +44,27 @@ public class ScheduledFactory {
             log.warn("ScheduledFactory.getScheduledService:null,origin code:{}", exeCode);
         }
         return null;
+    }
+
+    public List<Map<String, Object>> listExecutionCodes() {
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        for (String code : scheduledServiceMap.keySet()) {
+            result.add(buildExecutionCode(code, scheduledServiceMap.get(code).getName()));
+        }
+        return result;
+    }
+
+    public String getExecutionCodeSample(String code) {
+        ScheduledService scheduledService = scheduledServiceMap.get(code);
+        return scheduledService == null ? "{}" : scheduledService.getSample();
+    }
+
+    private Map<String, Object> buildExecutionCode(String code, String name) {
+        Map<String, Object> item = new LinkedHashMap<String, Object>();
+        item.put("code", code);
+        item.put("name", name);
+        item.put("title", name);
+        item.put("sample", getExecutionCodeSample(code));
+        return item;
     }
 }

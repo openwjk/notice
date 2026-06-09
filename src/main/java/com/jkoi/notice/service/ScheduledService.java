@@ -8,5 +8,9 @@ import java.util.Date;
 public interface ScheduledService {
     String getCode();
 
+    String getName();
+
+    String getSample();
+
     void execute(Date date, JsonNode node);
 }

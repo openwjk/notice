@@ -8,6 +8,7 @@ public class GitHubProperties {
     private String token;
     private String apiUrl;
     private String filePath;
+    private String statsFilePath;
     private String ref;
     private String accept;
     private String apiVersion;
@@ -35,6 +36,14 @@ public class GitHubProperties {
 
     public void setFilePath(String filePath) {
         this.filePath = filePath;
+    }
+
+    public String getStatsFilePath() {
+        return statsFilePath;
+    }
+
+    public void setStatsFilePath(String statsFilePath) {
+        this.statsFilePath = statsFilePath;
     }
 
     public String getRef() {

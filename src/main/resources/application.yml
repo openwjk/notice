@@ -8,13 +8,13 @@ notice:
   enabled: ${NOTICE_ENABLED:true}
   cron-field: ${NOTICE_CRON_FIELD:corn}
   data-field: ${NOTICE_DATA_FIELD:data}
-  on-change-only: ${NOTICE_ON_CHANGE_ONLY:true}
   max-content-length: ${NOTICE_MAX_CONTENT_LENGTH:3000}
 
 github:
   token: ${GITHUB_TOKEN:}
   api-url: ${GITHUB_API_URL:}
   file-path: ${GITHUB_FILE_PATH:/notice/notice.json}
+  stats-file-path: ${GITHUB_STATS_FILE_PATH:/notice/notice-stats.json}
   ref: ${GITHUB_REF:master}
   accept: ${GITHUB_ACCEPT:application/vnd.github+json}
   api-version: ${GITHUB_API_VERSION:2022-11-28}
@@ -23,6 +23,13 @@ github:
 wecom:
   webhook-url: ${WECOM_WEBHOOK_URL:}
   timeout-ms: ${WECOM_TIMEOUT_MS:10000}
+
+wechat:
+  app-id: ${WECHAT_APP_ID:}
+  secret: ${WECHAT_SECRET:}
+  session-url: ${WECHAT_SESSION_URL:https://api.weixin.qq.com/sns/jscode2session}
+  timeout-ms: ${WECHAT_TIMEOUT_MS:5000}
+  dev-fallback-enabled: ${WECHAT_DEV_FALLBACK_ENABLED:true}
 
 festival:
   calendar-url: ${FESTIVAL_CALENDAR_URL:https://ical.muhan.org}
@@ -36,8 +43,23 @@ tencent:
 
 hk:
   lunardate-url: https://data.weather.gov.hk/weatherAPI/opendata/lunardate.php?date=
+  timeout-ms: ${HK_TIMEOUT_MS:10000}
+
+notice-web:
+  storage-path: ${NOTICE_WEB_STORAGE_PATH:data/reminders.json}
+  stats-storage-path: ${NOTICE_WEB_STATS_STORAGE_PATH:data/reminder-stats.json}
 
 
 logging:
+  charset:
+    file: UTF-8
+  file:
+    name: ${NOTICE_LOG_FILE:logs/notice.log}
+  logback:
+    rollingpolicy:
+      file-name-pattern: ${NOTICE_LOG_FILE_PATTERN:logs/notice.%d{yyyy-MM-dd}.log}
+      max-history: ${NOTICE_LOG_MAX_HISTORY:7}
+      total-size-cap: ${NOTICE_LOG_TOTAL_SIZE_CAP:1GB}
+      clean-history-on-start: ${NOTICE_LOG_CLEAN_HISTORY_ON_START:true}
   level:
     com.jkoi.notice: INFO

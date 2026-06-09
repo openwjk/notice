@@ -56,6 +56,16 @@ public class ScheduledBirthdayReminderImpl implements ScheduledService {
     }
 
     @Override
+    public String getName() {
+        return "生日提醒";
+    }
+
+    @Override
+    public String getSample() {
+        return "{\"data\":[{\"name\":\"\u5f20\u4e09\",\"birthday\":\"1990-01-01\"}]}";
+    }
+
+    @Override
     public void execute(Date date, JsonNode node) {
         try {
             String message = buildMessage(date == null ? new Date() : date, node);

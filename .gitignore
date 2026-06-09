@@ -7,4 +7,6 @@ target/
 .settings/
 .env
 .local-browser
+logs/
+data/
 
