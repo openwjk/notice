@@ -217,6 +217,19 @@ class ReminderConfigControllerTest {
                 .contains("java.lang.IllegalStateException", "TestLogger.java:12", "Caused by");
     }
 
+    @Test
+    void returnsEmptyForInvalidRequestParameterType() {
+        ResponseEntity<Map> response = restTemplate.exchange(
+                "/api/system/logs?limit=120unionselect1,2--",
+                HttpMethod.GET,
+                new HttpEntity<Void>(headers()),
+                Map.class
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isEmpty();
+    }
+
     private HttpHeaders headers() {
         HttpHeaders headers = new HttpHeaders();
         headers.set("wxid", "test-openid");
