@@ -425,6 +425,8 @@ docker build -t notice:latest .
 ```bash
 docker run -d --name notice \
   -p 8080:8080 \
+  -v notice-logs:/app/logs \
+  -v notice-data:/app/data \
   -e GITHUB_TOKEN="ghp_xxx" \
   -e GITHUB_API_URL="https://github.com/openwjk/cli-config.git" \
   -e GITHUB_FILE_PATH="/notice/notice.json" \
@@ -438,10 +440,14 @@ docker run -d --name notice \
 Dockerfile 中设置了：
 
 ```text
+NOTICE_LOG_FILE=/app/logs/notice.log
+NOTICE_LOG_FILE_PATTERN=/app/logs/notice.%d{yyyy-MM-dd}.log
+NOTICE_WEB_STORAGE_PATH=/app/data/reminders.json
+NOTICE_WEB_STATS_STORAGE_PATH=/app/data/reminder-stats.json
 JAVA_TOOL_OPTIONS=-Dsun.io.useCanonCaches=false
 ```
 
-这是为了避免 Tomcat 全局 canonical file name cache 相关风险。
+镜像会提前创建 `/app/logs` 和 `/app/data`，并授权给容器内的 `notice` 用户。如果改用宿主机 bind mount，也要确保宿主机目录允许容器用户写入。`JAVA_TOOL_OPTIONS` 用于避免 Tomcat 全局 canonical file name cache 相关风险。
 
 ## 开发检查
 

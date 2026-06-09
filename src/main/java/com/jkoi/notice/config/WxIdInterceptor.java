@@ -1,5 +1,8 @@
 package com.jkoi.notice.config;
 
+import com.jkoi.notice.task.GitHubNoticeScheduler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -10,6 +13,7 @@ import java.io.IOException;
 
 @Component
 public class WxIdInterceptor implements HandlerInterceptor {
+    private static final Logger log = LoggerFactory.getLogger(WxIdInterceptor.class);
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
@@ -21,8 +25,10 @@ public class WxIdInterceptor implements HandlerInterceptor {
         if (StringUtils.hasText(wxid) || StringUtils.hasText(xWxId)) {
             return true;
         }
-        if (System.getenv("JKOI_NOTICE_IGNORE_WXID") != null && System.getenv("JKOI_NOTICE_IGNORE_WXID").equals(wxid))
+        if (System.getenv("JKOI_NOTICE_IGNORE_WXID") != null && System.getenv("JKOI_NOTICE_IGNORE_WXID").equals(wxid)) {
             return true;
+        }
+        log.warn("wxid is {}, request: {}", wxid, request.getRequestURI());
         writeEmptyResponse(response);
         return false;
     }
