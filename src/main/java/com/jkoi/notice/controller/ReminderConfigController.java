@@ -70,6 +70,15 @@ public class ReminderConfigController {
         return save(reminderConfig);
     }
 
+    @PutMapping("/{id}/toggle")
+    public Map<String, Object> toggleEnabled(@PathVariable String id) {
+        ReminderConfig toggled = reminderConfigService.toggleEnabled(id);
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        data.put("item", toggled);
+        data.put("dashboard", reminderConfigService.getDashboard());
+        return ok(data);
+    }
+
     @DeleteMapping("/{id}")
     public Map<String, Object> delete(@PathVariable String id) {
         boolean deleted = reminderConfigService.delete(id);

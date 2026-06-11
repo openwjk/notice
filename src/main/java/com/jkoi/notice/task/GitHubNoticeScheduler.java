@@ -155,7 +155,8 @@ public class GitHubNoticeScheduler {
                 || fieldName.equals(noticeProperties.getCronField())
                 || "exeCode".equals(fieldName)
                 || "dataField".equals(fieldName)
-                || "fields".equals(fieldName);
+                || "fields".equals(fieldName)
+                || "updatedAt".equals(fieldName);
     }
 
     private PollResult collectMatchedData(JsonNode root, LocalDateTime taskStartedAt) throws Exception {

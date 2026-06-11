@@ -1,5 +1,6 @@
 package com.jkoi.notice.model;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,6 +17,7 @@ public class ReminderConfig {
     private List<ReminderField> fields = new ArrayList<ReminderField>();
     private boolean enabled = true;
     private boolean deleted;
+    private LocalDateTime updatedAt;
 
     public String getId() {
         return id;
@@ -103,5 +105,13 @@ public class ReminderConfig {
 
     public void setDeleted(boolean deleted) {
         this.deleted = deleted;
+    }
+
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(LocalDateTime updatedAt) {
+        this.updatedAt = updatedAt;
     }
 }

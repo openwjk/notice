@@ -92,18 +92,48 @@ public class ReminderConfigService {
     }
 
     public synchronized List<ReminderConfig> list() {
-        List<ReminderConfig> result = new ArrayList<ReminderConfig>();
+        List<ReminderConfig> enabled = new ArrayList<ReminderConfig>();
+        List<ReminderConfig> disabled = new ArrayList<ReminderConfig>();
         for (ReminderConfig reminder : reminders) {
             if (!reminder.isDeleted()) {
-                result.add(reminder);
+                if (reminder.isEnabled()) {
+                    enabled.add(reminder);
+                } else {
+                    disabled.add(reminder);
+                }
             }
         }
+        List<ReminderConfig> result = new ArrayList<ReminderConfig>(enabled.size() + disabled.size());
+        result.addAll(enabled);
+        result.addAll(disabled);
         return result;
+    }
+
+    public synchronized ReminderConfig toggleEnabled(String id) {
+        if (!StringUtils.hasText(id)) {
+            return null;
+        }
+        List<ReminderConfig> current = readSourceReminders();
+        ReminderConfig toggled = null;
+        for (ReminderConfig reminder : current) {
+            if (id.equals(reminder.getId()) && !reminder.isDeleted()) {
+                reminder.setEnabled(!reminder.isEnabled());
+                reminder.setUpdatedAt(LocalDateTime.now().withNano(0));
+                toggled = reminder;
+                break;
+            }
+        }
+        if (toggled != null) {
+            writeSourceReminders(current);
+            reminders = current;
+        }
+        return toggled;
     }
 
     public synchronized ReminderConfig save(ReminderConfig input) {
         List<ReminderConfig> current = readSourceReminders();
         ReminderConfig normalized = normalize(input);
+        normalized.setUpdatedAt(LocalDateTime.now().withNano(0));
         boolean updated = false;
         for (int i = 0; i < current.size(); i++) {
             if (normalized.getId().equals(current.get(i).getId())) {
@@ -410,6 +440,9 @@ public class ReminderConfigService {
         reminder.setDataField(defaultText(reminder.getDataField(), "data"));
         reminder.setFields(normalizeFields(reminder));
         syncLegacyData(reminder);
+        if (reminder.getUpdatedAt() == null) {
+            reminder.setUpdatedAt(LocalDateTime.now().withNano(0));
+        }
         return reminder;
     }
 
@@ -679,6 +712,9 @@ public class ReminderConfigService {
         if (isFixedFlow(reminder.getType())) {
             payload.put("exeCode", reminder.getExeCode());
         }
+        if (reminder.getUpdatedAt() != null) {
+            payload.put("updatedAt", DATE_TIME_FORMATTER.format(reminder.getUpdatedAt()));
+        }
         putFields(payload, reminder);
         return payload;
     }
@@ -744,6 +780,18 @@ public class ReminderConfigService {
         reminder.setExeCode(textOf(item, "exeCode"));
         reminder.setDeleted(item.has("deleted") && item.get("deleted").asBoolean(false));
         reminder.setEnabled(!item.has("enabled") || item.get("enabled").asBoolean(true));
+        String updatedAt = textOf(item, "updatedAt");
+        if (StringUtils.hasText(updatedAt)) {
+            try {
+                reminder.setUpdatedAt(LocalDateTime.parse(updatedAt, DATE_TIME_FORMATTER));
+            } catch (DateTimeParseException ignored) {
+                try {
+                    reminder.setUpdatedAt(LocalDateTime.parse(updatedAt));
+                } catch (DateTimeParseException ignored2) {
+                    // keep null
+                }
+            }
+        }
         reminder.setFields(readFields(item));
 
         String title = textOf(item, "title");
@@ -814,7 +862,8 @@ public class ReminderConfigService {
                 || "exeCode".equals(fieldName)
                 || "dataField".equals(fieldName)
                 || "testDate".equals(fieldName)
-                || "fields".equals(fieldName);
+                || "fields".equals(fieldName)
+                || "updatedAt".equals(fieldName);
     }
 
     private String textOf(JsonNode item, String fieldName) {
