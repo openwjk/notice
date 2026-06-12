@@ -24,14 +24,14 @@ public class WxIdInterceptor implements HandlerInterceptor {
         String wxid = request.getHeader("wxid");
         String xWxId = request.getHeader("X-Wx-Id");
         if (StringUtils.hasText(wxid) || StringUtils.hasText(xWxId)) {
-            return true;
+            // 支持通过环境变量跳过 wxid 校验
+            String ignoreWxId = System.getenv("JKOI_NOTICE_IGNORE_WXID");
+                log.info("wxid is: {}", wxid);
+            if (ignoreWxId.equals(wxid)) {
+                return true;
+            }
         }
 
-        // 支持通过环境变量跳过 wxid 校验
-        String ignoreWxId = System.getenv("JKOI_NOTICE_IGNORE_WXID");
-        if ("true".equalsIgnoreCase(ignoreWxId)) {
-            return true;
-        }
 
         log.warn("Missing wxid header, request: {}", request.getRequestURI());
         writeEmptyResponse(response);
