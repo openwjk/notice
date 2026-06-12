@@ -11,10 +11,12 @@ import com.jkoi.notice.model.ReminderConfig;
 import com.jkoi.notice.model.ReminderField;
 import com.jkoi.notice.model.ReminderStatRecord;
 import com.jkoi.notice.model.ReminderStats;
+import com.jkoi.notice.util.MetadataFields;
+import com.jkoi.notice.util.TextUtils;
 import org.quartz.CronExpression;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.util.DigestUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.util.DigestUtils;
 import org.springframework.util.StringUtils;
 
 import javax.annotation.PostConstruct;
@@ -36,9 +38,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class ReminderConfigService {
+
+    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final int MAX_STAT_RECORDS = 200;
+    private static final int CRON_PREVIEW_LIMIT = 7;
 
     private final ObjectMapper objectMapper;
     private final WeComWebhookClient weComWebhookClient;
@@ -48,9 +55,9 @@ public class ReminderConfigService {
     private final Path storagePath;
     private final Path statsStoragePath;
     private final String githubStatsFilePath;
-    private List<ReminderConfig> reminders = new ArrayList<ReminderConfig>();
+
+    private List<ReminderConfig> reminders = new ArrayList<>();
     private ReminderStats stats = new ReminderStats();
-    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     public ReminderConfigService(ObjectMapper objectMapper,
                                  WeComWebhookClient weComWebhookClient,
@@ -70,20 +77,20 @@ public class ReminderConfigService {
         this.githubStatsFilePath = githubStatsFilePath;
     }
 
+    // ======================== 初始化 ========================
+
     @PostConstruct
     public synchronized void init() {
         List<ReminderConfig> loaded = readLocalReminders();
-        List<ReminderConfig> normalized = new ArrayList<ReminderConfig>();
-        for (ReminderConfig reminder : loaded) {
-            normalized.add(normalize(reminder));
-        }
-        this.reminders = normalized;
+        this.reminders = loaded.stream().map(this::normalize).collect(Collectors.toList());
         this.stats = ensureTodayStats(readStats());
     }
 
+    // ======================== 查询 ========================
+
     public synchronized Map<String, Object> getDashboard() {
         refreshFromSource();
-        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        Map<String, Object> result = new LinkedHashMap<>();
         result.put("items", list());
         result.put("stats", buildStats());
         result.put("exportJson", exportSchedulerPayloadFrom(reminders));
@@ -92,22 +99,20 @@ public class ReminderConfigService {
     }
 
     public synchronized List<ReminderConfig> list() {
-        List<ReminderConfig> enabled = new ArrayList<ReminderConfig>();
-        List<ReminderConfig> disabled = new ArrayList<ReminderConfig>();
+        List<ReminderConfig> enabled = new ArrayList<>();
+        List<ReminderConfig> disabled = new ArrayList<>();
         for (ReminderConfig reminder : reminders) {
             if (!reminder.isDeleted()) {
-                if (reminder.isEnabled()) {
-                    enabled.add(reminder);
-                } else {
-                    disabled.add(reminder);
-                }
+                (reminder.isEnabled() ? enabled : disabled).add(reminder);
             }
         }
-        List<ReminderConfig> result = new ArrayList<ReminderConfig>(enabled.size() + disabled.size());
+        List<ReminderConfig> result = new ArrayList<>(enabled.size() + disabled.size());
         result.addAll(enabled);
         result.addAll(disabled);
         return result;
     }
+
+    // ======================== 变更操作 ========================
 
     public synchronized ReminderConfig toggleEnabled(String id) {
         if (!StringUtils.hasText(id)) {
@@ -118,7 +123,7 @@ public class ReminderConfigService {
         for (ReminderConfig reminder : current) {
             if (id.equals(reminder.getId()) && !reminder.isDeleted()) {
                 reminder.setEnabled(!reminder.isEnabled());
-                reminder.setUpdatedAt(LocalDateTime.now().withNano(0));
+                reminder.setUpdatedAt(now());
                 toggled = reminder;
                 break;
             }
@@ -133,7 +138,8 @@ public class ReminderConfigService {
     public synchronized ReminderConfig save(ReminderConfig input) {
         List<ReminderConfig> current = readSourceReminders();
         ReminderConfig normalized = normalize(input);
-        normalized.setUpdatedAt(LocalDateTime.now().withNano(0));
+        normalized.setUpdatedAt(now());
+
         boolean updated = false;
         for (int i = 0; i < current.size(); i++) {
             if (normalized.getId().equals(current.get(i).getId())) {
@@ -175,6 +181,8 @@ public class ReminderConfigService {
         return deleted;
     }
 
+    // ======================== 导出 ========================
+
     public synchronized ArrayNode exportSchedulerPayload() {
         refreshFromSource();
         return exportSchedulerPayloadFrom(reminders);
@@ -190,16 +198,18 @@ public class ReminderConfigService {
         return arrayNode;
     }
 
+    // ======================== 统计 ========================
+
     public synchronized Map<String, Object> buildStats() {
         return toStatsMap(syncStatsWithEnabled(true));
     }
 
     public synchronized void recordScheduleResult(int matchedCount, int errorCount, String errorMessage) {
-        List<ReminderStatRecord> matchedRecords = new ArrayList<ReminderStatRecord>();
+        List<ReminderStatRecord> matchedRecords = new ArrayList<>();
         for (int i = 0; i < matchedCount; i++) {
             matchedRecords.add(new ReminderStatRecord("", "未命名提醒", "", "", "", ""));
         }
-        List<ReminderStatRecord> errorRecords = new ArrayList<ReminderStatRecord>();
+        List<ReminderStatRecord> errorRecords = new ArrayList<>();
         for (int i = 0; i < errorCount; i++) {
             errorRecords.add(new ReminderStatRecord("", "未命名提醒", "", "", "", errorMessage));
         }
@@ -218,11 +228,13 @@ public class ReminderConfigService {
         try {
             reminders = readSourceReminders();
         } catch (Exception ignored) {
-            // Keep the latest in-memory reminders so stats can still be updated.
+            // 保留内存中最新的 reminders，以便统计仍可更新
         }
+
         ReminderStats current = ensureTodayStats(readStats());
         current.setEnabled(countEnabled(reminders));
-        String now = LocalDateTime.now().withNano(0).toString();
+        String now = now().toString();
+
         if (matchedCount > 0) {
             current.setTodayMatched(current.getTodayMatched() + matchedCount);
             current.setLastMatchedAt(now);
@@ -231,21 +243,25 @@ public class ReminderConfigService {
         if (errorCount > 0) {
             current.setErrors(current.getErrors() + errorCount);
             current.setLastErrorAt(now);
-            current.setLastErrorMessage(truncate(errorMessage, 500));
+            current.setLastErrorMessage(TextUtils.truncate(errorMessage, 500));
             current.setErrorRecords(appendRecords(current.getErrorRecords(), errorRecords, now, errorMessage));
         }
         writeStats(current);
         stats = current;
     }
 
+    // ======================== 测试 & 预览 ========================
+
     public Map<String, Object> testSend(ReminderConfig input) {
         ReminderConfig reminder = normalize(input);
-        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        Map<String, Object> result = new LinkedHashMap<>();
         ObjectNode payload = toSchedulerPayload(reminder);
         Map<String, Object> match = matchCronAtTestTime(reminder.getCron(), reminder.getTestDate());
+
         result.put("testDate", match.get("testDate"));
         result.put("matched", match.get("matched"));
         result.put("matchedAt", match.get("matchedAt"));
+
         if (!Boolean.TRUE.equals(match.get("matched"))) {
             result.put("sent", false);
             result.put("message", match.get("message"));
@@ -258,6 +274,7 @@ public class ReminderConfigService {
             result.put("content", buildTestContent(payload));
             return result;
         }
+
         Date matchedAt = (Date) match.get("matchedDate");
         String content = executeTestPayload(payload, matchedAt);
         result.put("sent", true);
@@ -272,9 +289,10 @@ public class ReminderConfigService {
     }
 
     private Map<String, Object> previewCron(String cron) {
-        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        Map<String, Object> result = new LinkedHashMap<>();
         result.put("valid", false);
-        result.put("nextTimes", new ArrayList<String>());
+        result.put("nextTimes", new ArrayList<>());
+
         if (!StringUtils.hasText(cron)) {
             result.put("message", "请先填写 Cron 表达式");
             return result;
@@ -282,7 +300,7 @@ public class ReminderConfigService {
         try {
             CronExpression expression = new CronExpression(cron);
             result.put("valid", true);
-            result.put("nextTimes", nextFireTimes(expression, new Date(), 7));
+            result.put("nextTimes", nextFireTimes(expression, new Date(), CRON_PREVIEW_LIMIT));
             result.put("message", "Cron 表达式有效");
         } catch (Exception ex) {
             result.put("message", "Cron 表达式无效");
@@ -290,10 +308,13 @@ public class ReminderConfigService {
         return result;
     }
 
+    // ======================== Cron 匹配与预览 ========================
+
     private Map<String, Object> matchCronAtTestTime(String cron, String testDate) {
-        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        Map<String, Object> result = new LinkedHashMap<>();
         result.put("matched", false);
         result.put("matchedAt", "");
+
         if (!StringUtils.hasText(cron)) {
             result.put("testDate", defaultTestDateTime(testDate));
             result.put("message", "请先填写 Cron 表达式");
@@ -304,6 +325,7 @@ public class ReminderConfigService {
             LocalDateTime dateTime = parseTestDateTime(testDate);
             Date matchedAt = toDate(dateTime);
             result.put("testDate", formatDateTime(matchedAt));
+
             if (expression.isSatisfiedBy(matchedAt)) {
                 result.put("matched", true);
                 result.put("matchedAt", formatDateTime(matchedAt));
@@ -320,7 +342,7 @@ public class ReminderConfigService {
     }
 
     private List<String> nextFireTimes(CronExpression expression, Date start, int limit) {
-        List<String> result = new ArrayList<String>();
+        List<String> result = new ArrayList<>();
         Date cursor = start;
         for (int i = 0; i < limit; i++) {
             Date next = expression.getNextValidTimeAfter(cursor);
@@ -336,38 +358,7 @@ public class ReminderConfigService {
         return result;
     }
 
-    private LocalDateTime parseTestDateTime(String testDate) {
-        if (!StringUtils.hasText(testDate)) {
-            return LocalDateTime.now().withSecond(0).withNano(0);
-        }
-        String value = testDate.trim();
-        if (value.length() == 10) {
-            return LocalDate.parse(value).atStartOfDay();
-        }
-        if (value.length() == 16) {
-            return LocalDateTime.parse(value + ":00", DATE_TIME_FORMATTER);
-        }
-        if (value.length() > 19) {
-            value = value.substring(0, 19);
-        }
-        return LocalDateTime.parse(value, DATE_TIME_FORMATTER);
-    }
-
-    private String defaultTestDateTime(String testDate) {
-        try {
-            return DATE_TIME_FORMATTER.format(parseTestDateTime(testDate));
-        } catch (DateTimeParseException ex) {
-            return DATE_TIME_FORMATTER.format(LocalDateTime.now().withSecond(0).withNano(0));
-        }
-    }
-
-    private Date toDate(LocalDateTime dateTime) {
-        return Date.from(dateTime.atZone(ZoneId.systemDefault()).toInstant());
-    }
-
-    private String formatDateTime(Date date) {
-        return DATE_TIME_FORMATTER.format(LocalDateTime.ofInstant(date.toInstant(), ZoneId.systemDefault()));
-    }
+    // ======================== 测试执行 ========================
 
     private String executeTestPayload(ObjectNode payload, Date matchedAt) {
         JsonNode exeNode = payload.get("exeCode");
@@ -420,48 +411,50 @@ public class ReminderConfigService {
         Iterator<String> fieldNames = payload.fieldNames();
         while (fieldNames.hasNext()) {
             String fieldName = fieldNames.next();
-            if (!isMetadataField(fieldName)) {
+            if (!MetadataFields.isMetadata(fieldName, noticeProperties)) {
                 return fieldName;
             }
         }
         return configuredDataField;
     }
 
+    // ======================== 数据规范化 ========================
+
     private ReminderConfig normalize(ReminderConfig input) {
         ReminderConfig reminder = input == null ? new ReminderConfig() : input;
         if (!StringUtils.hasText(reminder.getId())) {
             reminder.setId("r-" + UUID.randomUUID().toString().replace("-", ""));
         }
-        reminder.setTitle(defaultText(reminder.getTitle(), "未命名提醒"));
+        reminder.setTitle(TextUtils.defaultText(reminder.getTitle(), "未命名提醒"));
         reminder.setType(normalizeType(reminder.getType()));
-        reminder.setCron(trim(reminder.getCron()));
-        reminder.setData(trim(reminder.getData()));
-        reminder.setExeCode(trim(reminder.getExeCode()));
-        reminder.setDataField(defaultText(reminder.getDataField(), "data"));
+        reminder.setCron(TextUtils.trim(reminder.getCron()));
+        reminder.setData(TextUtils.trim(reminder.getData()));
+        reminder.setExeCode(TextUtils.trim(reminder.getExeCode()));
+        reminder.setDataField(TextUtils.defaultText(reminder.getDataField(), "data"));
         reminder.setFields(normalizeFields(reminder));
         syncLegacyData(reminder);
         if (reminder.getUpdatedAt() == null) {
-            reminder.setUpdatedAt(LocalDateTime.now().withNano(0));
+            reminder.setUpdatedAt(now());
         }
         return reminder;
     }
 
     private List<ReminderField> normalizeFields(ReminderConfig reminder) {
-        List<ReminderField> result = new ArrayList<ReminderField>();
+        List<ReminderField> result = new ArrayList<>();
         if (reminder.getFields() != null) {
             for (ReminderField field : reminder.getFields()) {
                 if (field == null) {
                     continue;
                 }
-                String name = trim(field.getName());
-                if (!StringUtils.hasText(name) || isMetadataField(name)) {
+                String name = TextUtils.trim(field.getName());
+                if (!StringUtils.hasText(name) || MetadataFields.isMetadata(name, noticeProperties)) {
                     continue;
                 }
-                result.add(new ReminderField(name, trim(field.getValue())));
+                result.add(new ReminderField(name, TextUtils.trim(field.getValue())));
             }
         }
         if (result.isEmpty() && StringUtils.hasText(reminder.getData())) {
-            result.add(new ReminderField(defaultText(reminder.getDataField(), "data"), reminder.getData()));
+            result.add(new ReminderField(TextUtils.defaultText(reminder.getDataField(), "data"), reminder.getData()));
         }
         if (result.isEmpty()) {
             result.add(new ReminderField("data", ""));
@@ -471,33 +464,242 @@ public class ReminderConfigService {
 
     private void syncLegacyData(ReminderConfig reminder) {
         if (reminder.getFields() == null || reminder.getFields().isEmpty()) {
-            reminder.setDataField(defaultText(reminder.getDataField(), "data"));
-            reminder.setData(trim(reminder.getData()));
+            reminder.setDataField(TextUtils.defaultText(reminder.getDataField(), "data"));
+            reminder.setData(TextUtils.trim(reminder.getData()));
             return;
         }
         ReminderField first = reminder.getFields().get(0);
-        reminder.setDataField(defaultText(first.getName(), "data"));
-        reminder.setData(trim(first.getValue()));
+        reminder.setDataField(TextUtils.defaultText(first.getName(), "data"));
+        reminder.setData(TextUtils.trim(first.getValue()));
     }
+
+    private String normalizeType(String type) {
+        String normalized = TextUtils.defaultText(type, "text");
+        if ("flow".equals(normalized) || "task".equals(normalized)) {
+            return "flow";
+        }
+        return "text";
+    }
+
+    // ======================== 数据源读写 ========================
 
     private void refreshFromSource() {
         reminders = readSourceReminders();
     }
 
     private List<ReminderConfig> readSourceReminders() {
-        if (gitHubClient.isConfigured()) {
-            return readGitHubReminders();
-        }
-        return readLocalReminders();
+        return gitHubClient.isConfigured() ? readGitHubReminders() : readLocalReminders();
     }
 
     private void writeSourceReminders(List<ReminderConfig> source) {
         if (gitHubClient.isConfigured()) {
             writeGitHubReminders(source);
+        } else {
+            writeLocalReminders(source);
+        }
+    }
+
+    private List<ReminderConfig> readLocalReminders() {
+        if (!Files.exists(storagePath)) {
+            return new ArrayList<>();
+        }
+        try {
+            String json = new String(Files.readAllBytes(storagePath), StandardCharsets.UTF_8);
+            if (!StringUtils.hasText(json)) {
+                return new ArrayList<>();
+            }
+            return parseReminders(json);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to read reminder config: " + storagePath, ex);
+        }
+    }
+
+    private List<ReminderConfig> readGitHubReminders() {
+        return parseReminders(gitHubClient.fetchContent().getContent());
+    }
+
+    private List<ReminderConfig> parseReminders(String json) {
+        List<ReminderConfig> result = new ArrayList<>();
+        if (!StringUtils.hasText(json)) {
+            return result;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(json);
+            if (root.isTextual()) {
+                root = objectMapper.readTree(root.asText());
+            }
+            if (root.has("items") && root.get("items").isArray()) {
+                root = root.get("items");
+            }
+            if (!root.isArray()) {
+                return result;
+            }
+            for (int i = 0; i < root.size(); i++) {
+                JsonNode item = root.get(i);
+                if (item != null && item.isObject()) {
+                    result.add(normalize(fromConfigNode(item, i)));
+                }
+            }
+            return result;
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to parse reminder config from GitHub.", ex);
+        }
+    }
+
+    private ReminderConfig fromConfigNode(JsonNode item, int index) throws Exception {
+        ReminderConfig reminder = new ReminderConfig();
+        String id = TextUtils.textOf(item, "id");
+        reminder.setId(StringUtils.hasText(id) ? id : buildSyntheticId(item));
+
+        String type = TextUtils.textOf(item, "type");
+        reminder.setType(StringUtils.hasText(type) ? type : (item.has("exeCode") ? "flow" : "text"));
+        reminder.setCron(TextUtils.firstText(item, noticeProperties.getCronField(), "cron", "corn"));
+        reminder.setExeCode(TextUtils.textOf(item, "exeCode"));
+        reminder.setDeleted(item.has("deleted") && item.get("deleted").asBoolean(false));
+        reminder.setEnabled(!item.has("enabled") || item.get("enabled").asBoolean(true));
+
+        String updatedAt = TextUtils.textOf(item, "updatedAt");
+        if (StringUtils.hasText(updatedAt)) {
+            reminder.setUpdatedAt(parseUpdatedAt(updatedAt));
+        }
+
+        reminder.setFields(readFields(item));
+
+        String title = TextUtils.textOf(item, "title");
+        reminder.setTitle(StringUtils.hasText(title) ? title : buildTitle(reminder, index));
+        return reminder;
+    }
+
+    private LocalDateTime parseUpdatedAt(String updatedAt) {
+        try {
+            return LocalDateTime.parse(updatedAt, DATE_TIME_FORMATTER);
+        } catch (DateTimeParseException ignored) {
+            try {
+                return LocalDateTime.parse(updatedAt);
+            } catch (DateTimeParseException ignored2) {
+                return null;
+            }
+        }
+    }
+
+    private void writeGitHubReminders(List<ReminderConfig> source) {
+        try {
+            ArrayNode arrayNode = objectMapper.createArrayNode();
+            for (ReminderConfig reminder : source) {
+                arrayNode.add(toConfigPayload(normalize(reminder)));
+            }
+            String json = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(arrayNode);
+            gitHubClient.save(json);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to write reminder config to GitHub.", ex);
+        }
+    }
+
+    private void writeLocalReminders(List<ReminderConfig> source) {
+        try {
+            Path parent = storagePath.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            ArrayNode arrayNode = objectMapper.createArrayNode();
+            for (ReminderConfig reminder : source) {
+                arrayNode.add(toConfigPayload(normalize(reminder)));
+            }
+            String json = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(arrayNode);
+            Files.write(storagePath, json.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException ex) {
+            throw new IllegalStateException("Failed to write reminder config: " + storagePath, ex);
+        }
+    }
+
+    private List<ReminderField> readFields(JsonNode item) throws Exception {
+        List<ReminderField> fields = new ArrayList<>();
+        JsonNode fieldsNode = item.get("fields");
+        if (fieldsNode != null && fieldsNode.isArray()) {
+            for (JsonNode fieldNode : fieldsNode) {
+                String name = TextUtils.textOf(fieldNode, "name");
+                if (StringUtils.hasText(name) && !MetadataFields.isMetadata(name, noticeProperties)) {
+                    fields.add(new ReminderField(name, TextUtils.jsonValueToText(fieldNode.get("value"))));
+                }
+            }
+        }
+        Iterator<String> fieldNames = item.fieldNames();
+        while (fieldNames.hasNext()) {
+            String fieldName = fieldNames.next();
+            if (!MetadataFields.isMetadata(fieldName, noticeProperties)) {
+                fields.add(new ReminderField(fieldName, TextUtils.jsonValueToText(item.get(fieldName))));
+            }
+        }
+        return fields;
+    }
+
+    // ======================== Payload 构建 ========================
+
+    private ObjectNode toSchedulerPayload(ReminderConfig reminder) {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("id", reminder.getId());
+        payload.put("title", reminder.getTitle());
+        payload.put("type", reminder.getType());
+        if (StringUtils.hasText(reminder.getCron())) {
+            payload.put("cron", reminder.getCron());
+        }
+        if (isFixedFlow(reminder.getType())) {
+            payload.put("exeCode", reminder.getExeCode());
+        }
+        putFields(payload, reminder);
+        return payload;
+    }
+
+    private ObjectNode toConfigPayload(ReminderConfig reminder) {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("id", reminder.getId());
+        payload.put("title", reminder.getTitle());
+        payload.put("type", reminder.getType());
+        payload.put("enabled", reminder.isEnabled());
+        if (reminder.isDeleted()) {
+            payload.put("deleted", true);
+        }
+        if (StringUtils.hasText(reminder.getCron())) {
+            payload.put("cron", reminder.getCron());
+        }
+        if (isFixedFlow(reminder.getType())) {
+            payload.put("exeCode", reminder.getExeCode());
+        }
+        if (reminder.getUpdatedAt() != null) {
+            payload.put("updatedAt", DATE_TIME_FORMATTER.format(reminder.getUpdatedAt()));
+        }
+        putFields(payload, reminder);
+        return payload;
+    }
+
+    private void putData(ObjectNode payload, String dataField, String value) {
+        if (!StringUtils.hasText(value)) {
             return;
         }
-        writeLocalReminders(source);
+        try {
+            JsonNode data = objectMapper.readTree(value);
+            payload.set(dataField, data);
+        } catch (Exception ex) {
+            payload.put(dataField, value);
+        }
     }
+
+    private void putFields(ObjectNode payload, ReminderConfig reminder) {
+        if (reminder.getFields() == null) {
+            return;
+        }
+        for (ReminderField field : reminder.getFields()) {
+            if (field != null && StringUtils.hasText(field.getName())) {
+                putData(payload, field.getName(), field.getValue());
+            }
+        }
+    }
+
+    private boolean isFixedFlow(String type) {
+        return "flow".equals(type) || "task".equals(type);
+    }
+
+    // ======================== 统计管理 ========================
 
     private ReminderStats syncStatsWithEnabled(boolean persist) {
         ReminderStats current = readStats();
@@ -508,11 +710,11 @@ public class ReminderConfigService {
             changed = true;
         }
         if (current.getTodayRecords() == null) {
-            current.setTodayRecords(new ArrayList<ReminderStatRecord>());
+            current.setTodayRecords(new ArrayList<>());
             changed = true;
         }
         if (current.getErrorRecords() == null) {
-            current.setErrorRecords(new ArrayList<ReminderStatRecord>());
+            current.setErrorRecords(new ArrayList<>());
             changed = true;
         }
         if (changed && persist) {
@@ -534,10 +736,7 @@ public class ReminderConfigService {
 
     private ReminderStats readStats() {
         try {
-            if (gitHubClient.isConfigured()) {
-                return readGitHubStats();
-            }
-            return readLocalStats();
+            return gitHubClient.isConfigured() ? readGitHubStats() : readLocalStats();
         } catch (Exception ignored) {
             return new ReminderStats();
         }
@@ -622,13 +821,13 @@ public class ReminderConfigService {
         current.setLastMatchedAt("");
         current.setLastErrorAt("");
         current.setLastErrorMessage("");
-        current.setTodayRecords(new ArrayList<ReminderStatRecord>());
-        current.setErrorRecords(new ArrayList<ReminderStatRecord>());
+        current.setTodayRecords(new ArrayList<>());
+        current.setErrorRecords(new ArrayList<>());
         return true;
     }
 
     private Map<String, Object> toStatsMap(ReminderStats current) {
-        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        Map<String, Object> result = new LinkedHashMap<>();
         result.put("date", current.getDate());
         result.put("enabled", current.getEnabled());
         result.put("todayMatched", current.getTodayMatched());
@@ -636,304 +835,20 @@ public class ReminderConfigService {
         result.put("lastMatchedAt", current.getLastMatchedAt());
         result.put("lastErrorAt", current.getLastErrorAt());
         result.put("lastErrorMessage", current.getLastErrorMessage());
-        result.put("todayRecords", current.getTodayRecords() == null ? new ArrayList<ReminderStatRecord>() : current.getTodayRecords());
-        result.put("errorRecords", current.getErrorRecords() == null ? new ArrayList<ReminderStatRecord>() : current.getErrorRecords());
+        result.put("todayRecords", current.getTodayRecords() == null ? new ArrayList<>() : current.getTodayRecords());
+        result.put("errorRecords", current.getErrorRecords() == null ? new ArrayList<>() : current.getErrorRecords());
         return result;
     }
 
     private String resolveGitHubStatsFilePath() {
-        return defaultText(githubStatsFilePath, "/notice/notice-stats.json");
-    }
-
-    private ObjectNode toSchedulerPayload(ReminderConfig reminder) {
-        ObjectNode payload = objectMapper.createObjectNode();
-        payload.put("id", reminder.getId());
-        payload.put("title", reminder.getTitle());
-        payload.put("type", reminder.getType());
-        if (StringUtils.hasText(reminder.getCron())) {
-            payload.put("cron", reminder.getCron());
-        }
-
-        if (isFixedFlow(reminder.getType())) {
-            payload.put("exeCode", reminder.getExeCode());
-        }
-        putFields(payload, reminder);
-        return payload;
-    }
-
-    private boolean isFixedFlow(String type) {
-        return "flow".equals(type) || "task".equals(type);
-    }
-
-    private String normalizeType(String type) {
-        String normalized = defaultText(type, "text");
-        if ("flow".equals(normalized) || "task".equals(normalized)) {
-            return "flow";
-        }
-        return "text";
-    }
-
-    private void putData(ObjectNode payload, String dataField, String value) {
-        if (!StringUtils.hasText(value)) {
-            return;
-        }
-        try {
-            JsonNode data = objectMapper.readTree(value);
-            payload.set(dataField, data);
-        } catch (Exception ex) {
-            payload.put(dataField, value);
-        }
-    }
-
-    private void putFields(ObjectNode payload, ReminderConfig reminder) {
-        if (reminder.getFields() == null) {
-            return;
-        }
-        for (ReminderField field : reminder.getFields()) {
-            if (field != null && StringUtils.hasText(field.getName())) {
-                putData(payload, field.getName(), field.getValue());
-            }
-        }
-    }
-
-    private ObjectNode toConfigPayload(ReminderConfig reminder) {
-        ObjectNode payload = objectMapper.createObjectNode();
-        payload.put("id", reminder.getId());
-        payload.put("title", reminder.getTitle());
-        payload.put("type", reminder.getType());
-        payload.put("enabled", reminder.isEnabled());
-        if (reminder.isDeleted()) {
-            payload.put("deleted", true);
-        }
-        if (StringUtils.hasText(reminder.getCron())) {
-            payload.put("cron", reminder.getCron());
-        }
-
-        if (isFixedFlow(reminder.getType())) {
-            payload.put("exeCode", reminder.getExeCode());
-        }
-        if (reminder.getUpdatedAt() != null) {
-            payload.put("updatedAt", DATE_TIME_FORMATTER.format(reminder.getUpdatedAt()));
-        }
-        putFields(payload, reminder);
-        return payload;
-    }
-
-    private List<ReminderConfig> readLocalReminders() {
-        if (!Files.exists(storagePath)) {
-            return new ArrayList<ReminderConfig>();
-        }
-        try {
-            String json = new String(Files.readAllBytes(storagePath), StandardCharsets.UTF_8);
-            if (!StringUtils.hasText(json)) {
-                return new ArrayList<ReminderConfig>();
-            }
-            return parseReminders(json);
-        } catch (Exception ex) {
-            throw new IllegalStateException("Failed to read reminder config: " + storagePath, ex);
-        }
-    }
-
-    private List<ReminderConfig> readGitHubReminders() {
-        return parseReminders(gitHubClient.fetchContent().getContent());
-    }
-
-    private List<ReminderConfig> parseReminders(String json) {
-        List<ReminderConfig> result = new ArrayList<ReminderConfig>();
-        if (!StringUtils.hasText(json)) {
-            return result;
-        }
-        try {
-            JsonNode root = objectMapper.readTree(json);
-            if (root.isTextual()) {
-                root = objectMapper.readTree(root.asText());
-            }
-            if (root.has("items") && root.get("items").isArray()) {
-                root = root.get("items");
-            }
-            if (!root.isArray()) {
-                return result;
-            }
-            for (int i = 0; i < root.size(); i++) {
-                JsonNode item = root.get(i);
-                if (item != null && item.isObject()) {
-                    result.add(normalize(fromConfigNode(item, i)));
-                }
-            }
-            return result;
-        } catch (Exception ex) {
-            throw new IllegalStateException("Failed to parse reminder config from GitHub.", ex);
-        }
-    }
-
-    private ReminderConfig fromConfigNode(JsonNode item, int index) throws Exception {
-        ReminderConfig reminder = new ReminderConfig();
-        String id = textOf(item, "id");
-        reminder.setId(StringUtils.hasText(id) ? id : buildSyntheticId(item));
-
-        String type = textOf(item, "type");
-        if (!StringUtils.hasText(type)) {
-            type = item.has("exeCode") ? "flow" : "text";
-        }
-        reminder.setType(type);
-        reminder.setCron(firstText(item, noticeProperties.getCronField(), "cron", "corn"));
-        reminder.setExeCode(textOf(item, "exeCode"));
-        reminder.setDeleted(item.has("deleted") && item.get("deleted").asBoolean(false));
-        reminder.setEnabled(!item.has("enabled") || item.get("enabled").asBoolean(true));
-        String updatedAt = textOf(item, "updatedAt");
-        if (StringUtils.hasText(updatedAt)) {
-            try {
-                reminder.setUpdatedAt(LocalDateTime.parse(updatedAt, DATE_TIME_FORMATTER));
-            } catch (DateTimeParseException ignored) {
-                try {
-                    reminder.setUpdatedAt(LocalDateTime.parse(updatedAt));
-                } catch (DateTimeParseException ignored2) {
-                    // keep null
-                }
-            }
-        }
-        reminder.setFields(readFields(item));
-
-        String title = textOf(item, "title");
-        reminder.setTitle(StringUtils.hasText(title) ? title : buildTitle(reminder, index));
-        return reminder;
-    }
-
-    private void writeGitHubReminders(List<ReminderConfig> source) {
-        try {
-            ArrayNode arrayNode = objectMapper.createArrayNode();
-            for (ReminderConfig reminder : source) {
-                arrayNode.add(toConfigPayload(normalize(reminder)));
-            }
-            String json = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(arrayNode);
-            gitHubClient.save(json);
-        } catch (Exception ex) {
-            throw new IllegalStateException("Failed to write reminder config to GitHub.", ex);
-        }
-    }
-
-    private void writeLocalReminders(List<ReminderConfig> source) {
-        try {
-            Path parent = storagePath.getParent();
-            if (parent != null) {
-                Files.createDirectories(parent);
-            }
-            ArrayNode arrayNode = objectMapper.createArrayNode();
-            for (ReminderConfig reminder : source) {
-                arrayNode.add(toConfigPayload(normalize(reminder)));
-            }
-            String json = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(arrayNode);
-            Files.write(storagePath, json.getBytes(StandardCharsets.UTF_8));
-        } catch (IOException ex) {
-            throw new IllegalStateException("Failed to write reminder config: " + storagePath, ex);
-        }
-    }
-
-    private List<ReminderField> readFields(JsonNode item) throws Exception {
-        List<ReminderField> fields = new ArrayList<ReminderField>();
-        JsonNode fieldsNode = item.get("fields");
-        if (fieldsNode != null && fieldsNode.isArray()) {
-            for (JsonNode fieldNode : fieldsNode) {
-                String name = textOf(fieldNode, "name");
-                if (StringUtils.hasText(name) && !isMetadataField(name)) {
-                    fields.add(new ReminderField(name, jsonValueToText(fieldNode.get("value"))));
-                }
-            }
-        }
-        Iterator<String> fieldNames = item.fieldNames();
-        while (fieldNames.hasNext()) {
-            String fieldName = fieldNames.next();
-            if (!isMetadataField(fieldName)) {
-                fields.add(new ReminderField(fieldName, jsonValueToText(item.get(fieldName))));
-            }
-        }
-        return fields;
-    }
-
-    private boolean isMetadataField(String fieldName) {
-        return "id".equals(fieldName)
-                || "title".equals(fieldName)
-                || "type".equals(fieldName)
-                || "enabled".equals(fieldName)
-                || "deleted".equals(fieldName)
-                || "cron".equals(fieldName)
-                || "corn".equals(fieldName)
-                || fieldName.equals(noticeProperties.getCronField())
-                || "exeCode".equals(fieldName)
-                || "dataField".equals(fieldName)
-                || "testDate".equals(fieldName)
-                || "fields".equals(fieldName)
-                || "updatedAt".equals(fieldName);
-    }
-
-    private String textOf(JsonNode item, String fieldName) {
-        if (item == null || !StringUtils.hasText(fieldName)) {
-            return "";
-        }
-        JsonNode value = item.get(fieldName);
-        return value == null || value.isNull() ? "" : value.asText("").trim();
-    }
-
-    private String firstText(JsonNode item, String... fieldNames) {
-        for (String fieldName : fieldNames) {
-            String value = textOf(item, fieldName);
-            if (StringUtils.hasText(value)) {
-                return value;
-            }
-        }
-        return "";
-    }
-
-    private String jsonValueToText(JsonNode value) throws Exception {
-        if (value == null || value.isNull()) {
-            return "";
-        }
-        if (value.isTextual()) {
-            return value.asText();
-        }
-        return objectMapper.writeValueAsString(value);
-    }
-
-    private String buildSyntheticId(JsonNode item) {
-        return "g-" + DigestUtils.md5DigestAsHex(item.toString().getBytes(StandardCharsets.UTF_8));
-    }
-
-    private String buildTitle(ReminderConfig reminder, int index) {
-        if (isFixedFlow(reminder.getType())) {
-            return defaultText(reminder.getExeCode(), "\u5de5\u4f5c\u6d41 " + (index + 1));
-        }
-        String data = trim(reminder.getData());
-        if (!StringUtils.hasText(data) && reminder.getFields() != null && !reminder.getFields().isEmpty()) {
-            data = trim(reminder.getFields().get(0).getValue());
-        }
-        if (StringUtils.hasText(data)) {
-            return data.length() > 18 ? data.substring(0, 18) : data;
-        }
-        return "\u6587\u672c\u63d0\u9192 " + (index + 1);
-    }
-
-    private String defaultText(String value, String defaultValue) {
-        String trimmed = trim(value);
-        return StringUtils.hasText(trimmed) ? trimmed : defaultValue;
-    }
-
-    private String trim(String value) {
-        return value == null ? "" : value.trim();
-    }
-
-    private String truncate(String value, int maxLength) {
-        String text = trim(value);
-        if (maxLength <= 0 || text.length() <= maxLength) {
-            return text;
-        }
-        return text.substring(0, maxLength);
+        return TextUtils.defaultText(githubStatsFilePath, "/notice/notice-stats.json");
     }
 
     private List<ReminderStatRecord> appendRecords(List<ReminderStatRecord> current,
                                                    List<ReminderStatRecord> additions,
                                                    String occurredAt,
                                                    String defaultMessage) {
-        List<ReminderStatRecord> result = new ArrayList<ReminderStatRecord>();
+        List<ReminderStatRecord> result = new ArrayList<>();
         if (current != null) {
             result.addAll(current);
         }
@@ -942,9 +857,8 @@ public class ReminderConfigService {
                 result.add(normalizeStatRecord(addition, occurredAt, defaultMessage));
             }
         }
-        int maxRecords = 200;
-        if (result.size() > maxRecords) {
-            return new ArrayList<ReminderStatRecord>(result.subList(result.size() - maxRecords, result.size()));
+        if (result.size() > MAX_STAT_RECORDS) {
+            return new ArrayList<>(result.subList(result.size() - MAX_STAT_RECORDS, result.size()));
         }
         return result;
     }
@@ -953,13 +867,70 @@ public class ReminderConfigService {
                                                    String occurredAt,
                                                    String defaultMessage) {
         ReminderStatRecord record = source == null ? new ReminderStatRecord() : source;
-        record.setId(trim(record.getId()));
-        record.setTitle(defaultText(record.getTitle(), "未命名提醒"));
+        record.setId(TextUtils.trim(record.getId()));
+        record.setTitle(TextUtils.defaultText(record.getTitle(), "未命名提醒"));
         record.setType(normalizeType(record.getType()));
-        record.setCron(trim(record.getCron()));
-        record.setExeCode(trim(record.getExeCode()));
-        record.setMessage(defaultText(record.getMessage(), defaultMessage));
-        record.setOccurredAt(defaultText(record.getOccurredAt(), occurredAt));
+        record.setCron(TextUtils.trim(record.getCron()));
+        record.setExeCode(TextUtils.trim(record.getExeCode()));
+        record.setMessage(TextUtils.defaultText(record.getMessage(), defaultMessage));
+        record.setOccurredAt(TextUtils.defaultText(record.getOccurredAt(), occurredAt));
         return record;
+    }
+
+    // ======================== 辅助方法 ========================
+
+    private String buildSyntheticId(JsonNode item) {
+        return "g-" + DigestUtils.md5DigestAsHex(item.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private String buildTitle(ReminderConfig reminder, int index) {
+        if (isFixedFlow(reminder.getType())) {
+            return TextUtils.defaultText(reminder.getExeCode(), "工作流 " + (index + 1));
+        }
+        String data = TextUtils.trim(reminder.getData());
+        if (!StringUtils.hasText(data) && reminder.getFields() != null && !reminder.getFields().isEmpty()) {
+            data = TextUtils.trim(reminder.getFields().get(0).getValue());
+        }
+        if (StringUtils.hasText(data)) {
+            return data.length() > 18 ? data.substring(0, 18) : data;
+        }
+        return "文本提醒 " + (index + 1);
+    }
+
+    private LocalDateTime parseTestDateTime(String testDate) {
+        if (!StringUtils.hasText(testDate)) {
+            return LocalDateTime.now().withSecond(0).withNano(0);
+        }
+        String value = testDate.trim();
+        if (value.length() == 10) {
+            return LocalDate.parse(value).atStartOfDay();
+        }
+        if (value.length() == 16) {
+            return LocalDateTime.parse(value + ":00", DATE_TIME_FORMATTER);
+        }
+        if (value.length() > 19) {
+            value = value.substring(0, 19);
+        }
+        return LocalDateTime.parse(value, DATE_TIME_FORMATTER);
+    }
+
+    private String defaultTestDateTime(String testDate) {
+        try {
+            return DATE_TIME_FORMATTER.format(parseTestDateTime(testDate));
+        } catch (DateTimeParseException ex) {
+            return DATE_TIME_FORMATTER.format(LocalDateTime.now().withSecond(0).withNano(0));
+        }
+    }
+
+    private Date toDate(LocalDateTime dateTime) {
+        return Date.from(dateTime.atZone(ZoneId.systemDefault()).toInstant());
+    }
+
+    private String formatDateTime(Date date) {
+        return DATE_TIME_FORMATTER.format(LocalDateTime.ofInstant(date.toInstant(), ZoneId.systemDefault()));
+    }
+
+    private LocalDateTime now() {
+        return LocalDateTime.now().withNano(0);
     }
 }

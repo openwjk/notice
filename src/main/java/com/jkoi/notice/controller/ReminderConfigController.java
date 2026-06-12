@@ -20,7 +20,7 @@ import java.util.Map;
 @CrossOrigin
 @RestController
 @RequestMapping("/api/reminders")
-public class ReminderConfigController {
+public class ReminderConfigController extends BaseController {
 
     private final ReminderConfigService reminderConfigService;
     private final ScheduledFactory scheduledFactory;
@@ -48,7 +48,7 @@ public class ReminderConfigController {
 
     @GetMapping("/exe-codes/{code}/sample")
     public Map<String, Object> executionCodeSample(@PathVariable String code) {
-        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        Map<String, Object> data = new LinkedHashMap<>();
         data.put("code", code);
         data.put("sample", scheduledFactory.getExecutionCodeSample(code));
         return ok(data);
@@ -57,7 +57,7 @@ public class ReminderConfigController {
     @PostMapping
     public Map<String, Object> save(@RequestBody ReminderConfig reminderConfig) {
         ReminderConfig saved = reminderConfigService.save(reminderConfig);
-        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        Map<String, Object> data = new LinkedHashMap<>();
         data.put("item", saved);
         data.put("dashboard", reminderConfigService.getDashboard());
         return ok(data);
@@ -73,7 +73,7 @@ public class ReminderConfigController {
     @PutMapping("/{id}/toggle")
     public Map<String, Object> toggleEnabled(@PathVariable String id) {
         ReminderConfig toggled = reminderConfigService.toggleEnabled(id);
-        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        Map<String, Object> data = new LinkedHashMap<>();
         data.put("item", toggled);
         data.put("dashboard", reminderConfigService.getDashboard());
         return ok(data);
@@ -82,7 +82,7 @@ public class ReminderConfigController {
     @DeleteMapping("/{id}")
     public Map<String, Object> delete(@PathVariable String id) {
         boolean deleted = reminderConfigService.delete(id);
-        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        Map<String, Object> data = new LinkedHashMap<>();
         data.put("deleted", deleted);
         data.put("dashboard", reminderConfigService.getDashboard());
         return ok(data);
@@ -96,12 +96,5 @@ public class ReminderConfigController {
     @PostMapping("/cron/preview")
     public Map<String, Object> cronPreview(@RequestBody ReminderConfig reminderConfig) {
         return ok(reminderConfigService.previewCron(reminderConfig));
-    }
-
-    private Map<String, Object> ok(Object data) {
-        Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("success", true);
-        result.put("data", data);
-        return result;
     }
 }

@@ -1,22 +1,19 @@
 package com.jkoi.notice.util;
 
-import org.joda.time.DateTime;
-import org.joda.time.format.DateTimeFormat;
-import org.joda.time.format.DateTimeFormatter;
 import org.springframework.util.StringUtils;
 
-import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Date;
 
 /**
- * @author junkai.wang
- * @date 2026/6/2 15:20
- * @description desc
+ * 日期工具类，基于 java.time API。
  */
-public class DateUtil {
+public final class DateUtil {
+
     public static final String FORMAT_DATE_COMPACT = "yyyyMMdd";
     public static final String FORMAT_DATE_COMPACT_TILL_YEAR = "yyyy";
     public static final String FORMAT_DATE_NORMAL = "yyyy-MM-dd";
@@ -32,14 +29,15 @@ public class DateUtil {
     public static final String FORMAT_TIME_COMPACT_TILL_MINUTE = "HH:mm";
     public static final String FORMAT_DATETIME_COMPACT_MINUTE = "yyyyMMddHHmm";
 
+    private DateUtil() {
+    }
+
     public static Date getNow() {
         return new Date();
     }
 
     public static String getCurrentTime(String format) {
-        SimpleDateFormat dateFormat = new SimpleDateFormat(format);
-        Date date = new Date();
-        return dateFormat.format(date);
+        return LocalDateTime.now().format(DateTimeFormatter.ofPattern(format));
     }
 
     public static long getCurrentTimeMillis() {
@@ -47,86 +45,63 @@ public class DateUtil {
     }
 
     public static Integer getYear(Date date) {
-        return dateToLocalDate(date).getYear();
+        return toLocalDate(date).getYear();
     }
 
     public static Integer getMonth(Date date) {
-        return dateToLocalDate(date).getMonth().getValue();
+        return toLocalDate(date).getMonthValue();
     }
 
     public static Integer getDayOfMonth(Date date) {
-        return dateToLocalDate(date).getDayOfMonth();
-    }
-
-    private static LocalDate dateToLocalDate(Date date) {
-        Instant instant = date.toInstant();
-        ZoneId zoneId = ZoneId.systemDefault();
-        return instant.atZone(zoneId).toLocalDate();
+        return toLocalDate(date).getDayOfMonth();
     }
 
     public static Date parseDate(String dateStr, String formatPattern) {
         if (StringUtils.isEmpty(dateStr)) {
             return null;
-        } else {
-            DateTimeFormatter fmt = DateTimeFormat.forPattern(formatPattern);
-            return fmt.parseDateTime(dateStr).toDate();
         }
+        LocalDateTime dateTime = LocalDateTime.parse(dateStr, DateTimeFormatter.ofPattern(formatPattern));
+        return Date.from(dateTime.atZone(ZoneId.systemDefault()).toInstant());
     }
 
     public static Date getNowAtStart() {
-        DateTime dateTime = DateTime.now();
-        dateTime = dateTime.withTimeAtStartOfDay();
-        return dateTime.toDate();
+        return toDate(LocalDate.now().atStartOfDay());
     }
 
     public static Date getTomorrowAtStart() {
-        DateTime dateTime = DateTime.now();
-        dateTime = dateTime.plusDays(1);
-        dateTime = dateTime.withTimeAtStartOfDay();
-        return dateTime.toDate();
+        return toDate(LocalDate.now().plusDays(1).atStartOfDay());
     }
 
     public static Date getYesterdayAtStart() {
-        Date now = new Date();
-        DateTime dateTime = new DateTime(now);
-        dateTime = dateTime.minusDays(1);
-        dateTime = dateTime.withTimeAtStartOfDay();
-        return dateTime.toDate();
+        return toDate(LocalDate.now().minusDays(1).atStartOfDay());
     }
 
     public static Date plusYears(Date date, int years) {
-        DateTime dateTime = new DateTime(date);
-        return dateTime.plusYears(years).toDate();
+        return toDate(toLocalDateTime(date).plusYears(years));
     }
 
     public static Date plusMonths(Date date, int months) {
-        DateTime dateTime = new DateTime(date);
-        return dateTime.plusMonths(months).toDate();
+        return toDate(toLocalDateTime(date).plusMonths(months));
     }
 
     public static Date plusDays(Date date, int days) {
-        DateTime dateTime = new DateTime(date);
-        return dateTime.plusDays(days).toDate();
+        return toDate(toLocalDateTime(date).plusDays(days));
     }
 
     public static Date plusHours(Date date, int hours) {
-        DateTime dateTime = new DateTime(date);
-        return dateTime.plusHours(hours).toDate();
+        return toDate(toLocalDateTime(date).plusHours(hours));
     }
 
     public static Date plusMinutes(Date date, int minutes) {
-        DateTime dateTime = new DateTime(date);
-        return dateTime.plusMinutes(minutes).toDate();
+        return toDate(toLocalDateTime(date).plusMinutes(minutes));
     }
 
     public static Date plusSeconds(Date date, int seconds) {
-        DateTime dateTime = new DateTime(date);
-        return dateTime.plusSeconds(seconds).toDate();
+        return toDate(toLocalDateTime(date).plusSeconds(seconds));
     }
 
-    public static String formatDate(Date dt, String formatPattern) {
-        DateTime dateTime = new DateTime(dt);
-        return dateTime.toString(formatPattern);
+    public static String formatDate(Date date, String formatPattern) {
+        return toLocalDateTime(date).format(DateTimeFormatter.ofPattern(formatPattern));
     }
 
     public static String formatNow(String formatPattern) {
@@ -137,8 +112,22 @@ public class DateUtil {
         try {
             parseDate(value, format);
             return true;
-        } catch (Exception var4) {
+        } catch (Exception ignored) {
             return false;
         }
+    }
+
+    // ======================== 内部转换 ========================
+
+    private static LocalDate toLocalDate(Date date) {
+        return date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+    }
+
+    private static LocalDateTime toLocalDateTime(Date date) {
+        return date.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime();
+    }
+
+    private static Date toDate(LocalDateTime dateTime) {
+        return Date.from(dateTime.atZone(ZoneId.systemDefault()).toInstant());
     }
 }

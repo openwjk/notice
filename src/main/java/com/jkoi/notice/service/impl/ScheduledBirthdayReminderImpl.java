@@ -1,10 +1,11 @@
 package com.jkoi.notice.service.impl;
 
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jkoi.notice.client.WeComWebhookClient;
 import com.jkoi.notice.service.ScheduledService;
+import com.jkoi.notice.util.RestTemplateFactory;
+import com.jkoi.notice.util.TextUtils;
 import lombok.SneakyThrows;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,11 +14,9 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.ResourceAccessException;
-import org.springframework.web.client.RestTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
@@ -27,17 +26,13 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
-
-/**
- * @author wangjunkai
- * @description
- * @date 2023/7/28 13:38
- */
 @Service
 public class ScheduledBirthdayReminderImpl implements ScheduledService {
+
     private static final Logger log = LoggerFactory.getLogger(ScheduledBirthdayReminderImpl.class);
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
-    public static final String VERBAL_TRICK = "今天是%s生日，记得送上生日祝福哦~";
+    private static final String VERBAL_TRICK = "今天是%s生日，记得送上生日祝福哦~";
+    private static final int MAX_RETRY_COUNT = 10;
 
     private final WeComWebhookClient weComWebhookClient;
     private final String calendarUrl;
@@ -62,7 +57,7 @@ public class ScheduledBirthdayReminderImpl implements ScheduledService {
 
     @Override
     public String getSample() {
-        return "{\"data\":[{\"name\":\"\u5f20\u4e09\",\"birthday\":\"1990-01-01\"}]}";
+        return "{\"data\":[{\"name\":\"张三\",\"birthday\":\"1990-01-01\"}]}";
     }
 
     @Override
@@ -80,48 +75,49 @@ public class ScheduledBirthdayReminderImpl implements ScheduledService {
     private String buildMessage(Date date, JsonNode node) {
         LocalDate today = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
         JsonNode data = node.get("data");
-        if (data == null || !data.isArray())
+        if (data == null || !data.isArray()) {
             return null;
-        String toDayStr = today.format(DATE_FORMAT);
-        String lunarDate = getLunarDate(toDayStr);
+        }
+
+        String todayStr = today.format(DATE_FORMAT);
+        String lunarDate = getLunarDate(todayStr);
         List<String> names = new ArrayList<>();
+
         for (JsonNode item : data) {
-            String birthDay = item.get("birthday").asText();
-            String name = item.get("name").asText();
-            if (name.isEmpty())
+            String name = item.path("name").asText("");
+            if (name.isEmpty()) {
                 continue;
-            if (!toDayStr.isEmpty() && toDayStr.equals(birthDay)) {
-                names.add(name);
-            } else if (!lunarDate.isEmpty() && lunarDate.contains(birthDay)) {
+            }
+            String birthday = item.path("birthday").asText("");
+            if (todayStr.equals(birthday) || (!lunarDate.isEmpty() && lunarDate.contains(birthday))) {
                 names.add(name);
             }
         }
-        if (names.isEmpty())
-            return null;
-        return String.format(VERBAL_TRICK, String.join(",", names));
+
+        return names.isEmpty() ? null : String.format(VERBAL_TRICK, String.join(",", names));
     }
 
     @SneakyThrows
     private String getLunarDate(String today) {
-        int count = 0;
-        String lunarDateResp = requestHkLunarDate(today, count);
+        String lunarDateResp = requestHkLunarDate(today, 0);
         if (lunarDateResp != null && !lunarDateResp.isEmpty()) {
             JsonNode root = objectMapper.readTree(lunarDateResp);
-            return root.get("LunarDate") != null ? root.get("LunarDate").asText() : "";
+            JsonNode lunarDateNode = root.get("LunarDate");
+            return lunarDateNode != null ? lunarDateNode.asText() : "";
         }
         return "";
     }
 
-    private String requestHkLunarDate(String today, int count) {
-        RestTemplate restTemplate = createRestTemplate();
+    private String requestHkLunarDate(String today, int retryCount) {
         HttpHeaders headers = new HttpHeaders();
         headers.set("User-Agent", "notice");
         headers.set("Accept", "text/calendar,text/plain,*/*");
+
         try {
-            ResponseEntity<byte[]> response = restTemplate.exchange(
+            ResponseEntity<byte[]> response = RestTemplateFactory.create().exchange(
                     calendarUrl + today,
                     HttpMethod.GET,
-                    new HttpEntity<Void>(headers),
+                    new HttpEntity<>(headers),
                     byte[].class
             );
             byte[] body = response.getBody();
@@ -131,27 +127,12 @@ public class ScheduledBirthdayReminderImpl implements ScheduledService {
             log.warn("LunarDate '{}' returned empty content.", calendarUrl);
         } catch (ResourceAccessException ex) {
             log.warn("Failed to fetch lunarDate '{}'. Cause: {}",
-                    calendarUrl, getRootCauseMessage(ex));
-            if (count < 10) {
-                return requestHkLunarDate(today, ++count);
+                    calendarUrl, TextUtils.getRootCauseMessage(ex));
+            if (retryCount < MAX_RETRY_COUNT) {
+                return requestHkLunarDate(today, retryCount + 1);
             }
         }
         log.warn("LunarDate url failed. Please check DNS, proxy or calendarUrl.");
         return "";
-    }
-
-    private RestTemplate createRestTemplate() {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(10000);
-        factory.setReadTimeout(10000);
-        return new RestTemplate(factory);
-    }
-
-    private String getRootCauseMessage(Throwable throwable) {
-        Throwable current = throwable;
-        while (current.getCause() != null) {
-            current = current.getCause();
-        }
-        return current.getClass().getSimpleName() + ": " + current.getMessage();
     }
 }

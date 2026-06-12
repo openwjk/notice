@@ -3,8 +3,8 @@ package com.jkoi.notice.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jkoi.notice.config.WechatProperties;
+import com.jkoi.notice.util.RestTemplateFactory;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestTemplate;
@@ -18,10 +18,12 @@ public class WechatIdentityService {
 
     private final WechatProperties properties;
     private final ObjectMapper objectMapper;
+    private final RestTemplate restTemplate;
 
     public WechatIdentityService(WechatProperties properties, ObjectMapper objectMapper) {
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.restTemplate = RestTemplateFactory.create(properties.getTimeoutMs() <= 0 ? 5000 : properties.getTimeoutMs());
     }
 
     public String resolveWxId(String code) {
@@ -38,7 +40,7 @@ public class WechatIdentityService {
                     .queryParam("js_code", code)
                     .queryParam("grant_type", "authorization_code")
                     .toUriString();
-            ResponseEntity<String> response = createRestTemplate().getForEntity(url, String.class);
+            ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
             JsonNode root = objectMapper.readTree(response.getBody() == null ? "{}" : response.getBody());
             JsonNode openId = root.get("openid");
             String wxId = openId == null || openId.isNull() ? "" : openId.asText("");
@@ -67,13 +69,5 @@ public class WechatIdentityService {
         } catch (Exception ex) {
             return String.valueOf(Math.abs(value.hashCode()));
         }
-    }
-
-    private RestTemplate createRestTemplate() {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        int timeoutMs = properties.getTimeoutMs() <= 0 ? 5000 : properties.getTimeoutMs();
-        factory.setConnectTimeout(timeoutMs);
-        factory.setReadTimeout(timeoutMs);
-        return new RestTemplate(factory);
     }
 }

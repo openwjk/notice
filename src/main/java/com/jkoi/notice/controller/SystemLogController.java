@@ -19,7 +19,7 @@ import java.util.Map;
 @CrossOrigin
 @RestController
 @RequestMapping("/api/system/logs")
-public class SystemLogController {
+public class SystemLogController extends BaseController {
 
     private final SystemLogFileService systemLogFileService;
 
@@ -36,10 +36,11 @@ public class SystemLogController {
                                     @RequestParam(value = "end", required = false) String end) {
         LocalDateTime startTime = parseTime(start);
         LocalDateTime endTime = parseTime(end);
-        SystemLogFileService.LogQueryResult queryResult = systemLogFileService.query(after, before, limit, normalizeLevel(level), startTime, endTime);
+        SystemLogFileService.LogQueryResult queryResult = systemLogFileService.query(
+                after, before, limit, normalizeLevel(level), startTime, endTime);
         List<SystemLogEntry> entries = queryResult.getEntries();
 
-        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        Map<String, Object> data = new LinkedHashMap<>();
         data.put("entries", entries);
         data.put("cursor", queryResult.getCursor());
         data.put("total", queryResult.getTotal());
@@ -74,12 +75,5 @@ public class SystemLogController {
         } catch (Exception ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid log time: " + value);
         }
-    }
-
-    private Map<String, Object> ok(Object data) {
-        Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("success", true);
-        result.put("data", data);
-        return result;
     }
 }

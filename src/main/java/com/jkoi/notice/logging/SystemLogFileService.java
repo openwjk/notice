@@ -18,7 +18,6 @@ import java.time.format.DateTimeFormatterBuilder;
 import java.time.temporal.ChronoField;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -54,7 +53,8 @@ public class SystemLogFileService {
         List<SystemLogEntry> allEntries = readEntries();
         int safeLimit = Math.max(1, Math.min(limit, 300));
         boolean previousPageQuery = before > 0;
-        List<SystemLogEntry> matched = new ArrayList<SystemLogEntry>();
+        List<SystemLogEntry> matched = new ArrayList<>();
+
         for (SystemLogEntry entry : allEntries) {
             if (!previousPageQuery && after > 0 && entry.getSequence() <= after) {
                 continue;
@@ -75,26 +75,32 @@ public class SystemLogFileService {
             matched.add(entry);
         }
 
-        List<SystemLogEntry> entries;
-        boolean rangeQuery = start != null || end != null;
-        if (previousPageQuery && matched.size() > safeLimit) {
-            entries = new ArrayList<SystemLogEntry>(matched.subList(matched.size() - safeLimit, matched.size()));
-        } else if (after <= 0 && rangeQuery && matched.size() > safeLimit) {
-            entries = new ArrayList<SystemLogEntry>(matched.subList(0, safeLimit));
-        } else if (after <= 0 && matched.size() > safeLimit) {
-            entries = new ArrayList<SystemLogEntry>(matched.subList(matched.size() - safeLimit, matched.size()));
-        } else if (matched.size() > safeLimit) {
-            entries = new ArrayList<SystemLogEntry>(matched.subList(0, safeLimit));
-        } else {
-            entries = matched;
-        }
-
+        List<SystemLogEntry> entries = applyLimit(matched, safeLimit, previousPageQuery, start != null || end != null, after);
         long cursor = entries.isEmpty() ? latestSequence(allEntries) : entries.get(entries.size() - 1).getSequence();
         return new LogQueryResult(entries, cursor, allEntries.size(), logFilePath.toString());
     }
 
+    private List<SystemLogEntry> applyLimit(List<SystemLogEntry> matched, int limit,
+                                            boolean previousPageQuery, boolean rangeQuery, long after) {
+        if (matched.size() <= limit) {
+            return matched;
+        }
+        if (previousPageQuery) {
+            return new ArrayList<>(matched.subList(matched.size() - limit, matched.size()));
+        }
+        if (after <= 0 && rangeQuery) {
+            return new ArrayList<>(matched.subList(0, limit));
+        }
+        if (after <= 0) {
+            return new ArrayList<>(matched.subList(matched.size() - limit, matched.size()));
+        }
+        return new ArrayList<>(matched.subList(0, limit));
+    }
+
+    // ======================== 日志读取 ========================
+
     private List<SystemLogEntry> readEntries() {
-        List<SystemLogEntry> entries = new ArrayList<SystemLogEntry>();
+        List<SystemLogEntry> entries = new ArrayList<>();
         for (Path logFile : resolveLogFiles()) {
             readEntries(logFile, entries);
         }
@@ -103,7 +109,7 @@ public class SystemLogFileService {
     }
 
     private List<Path> resolveLogFiles() {
-        List<Path> logFiles = new ArrayList<Path>();
+        List<Path> logFiles = new ArrayList<>();
         if (rollingLogDirectory != null && Files.isDirectory(rollingLogDirectory)) {
             try (java.nio.file.DirectoryStream<Path> stream = Files.newDirectoryStream(rollingLogDirectory, rollingLogGlob)) {
                 for (Path path : stream) {
@@ -117,14 +123,11 @@ public class SystemLogFileService {
         if (Files.isRegularFile(logFilePath) && !logFiles.contains(logFilePath)) {
             logFiles.add(logFilePath);
         }
-        Collections.sort(logFiles, new Comparator<Path>() {
-            @Override
-            public int compare(Path left, Path right) {
-                try {
-                    return Files.getLastModifiedTime(left).compareTo(Files.getLastModifiedTime(right));
-                } catch (IOException ignored) {
-                    return left.toString().compareTo(right.toString());
-                }
+        logFiles.sort((left, right) -> {
+            try {
+                return Files.getLastModifiedTime(left).compareTo(Files.getLastModifiedTime(right));
+            } catch (IOException ignored) {
+                return left.toString().compareTo(right.toString());
             }
         });
         return logFiles;
@@ -148,22 +151,13 @@ public class SystemLogFileService {
     }
 
     private void renumber(List<SystemLogEntry> entries) {
-        Collections.sort(entries, new Comparator<SystemLogEntry>() {
-            @Override
-            public int compare(SystemLogEntry left, SystemLogEntry right) {
-                LocalDateTime leftTime = parseEntryTime(left.getTimestamp());
-                LocalDateTime rightTime = parseEntryTime(right.getTimestamp());
-                if (leftTime == null && rightTime == null) {
-                    return 0;
-                }
-                if (leftTime == null) {
-                    return 1;
-                }
-                if (rightTime == null) {
-                    return -1;
-                }
-                return leftTime.compareTo(rightTime);
-            }
+        entries.sort((left, right) -> {
+            LocalDateTime leftTime = parseEntryTime(left.getTimestamp());
+            LocalDateTime rightTime = parseEntryTime(right.getTimestamp());
+            if (leftTime == null && rightTime == null) return 0;
+            if (leftTime == null) return 1;
+            if (rightTime == null) return -1;
+            return leftTime.compareTo(rightTime);
         });
         for (int index = 0; index < entries.size(); index++) {
             SystemLogEntry entry = entries.get(index);
@@ -174,6 +168,8 @@ public class SystemLogFileService {
             entry.setSequence(sequence);
         }
     }
+
+    // ======================== 辅助方法 ========================
 
     private long latestSequence(List<SystemLogEntry> entries) {
         return entries.isEmpty() ? 0L : entries.get(entries.size() - 1).getSequence();
@@ -203,11 +199,7 @@ public class SystemLogFileService {
             return;
         }
         String existing = current.getThrowable();
-        if (StringUtils.hasText(existing)) {
-            current.setThrowable(existing + "\n" + line);
-        } else {
-            current.setThrowable(line);
-        }
+        current.setThrowable(StringUtils.hasText(existing) ? existing + "\n" + line : line);
     }
 
     private String formatTimestamp(String value) {
@@ -244,6 +236,8 @@ public class SystemLogFileService {
         int index = loggerName.lastIndexOf('.');
         return index >= 0 ? loggerName.substring(index + 1) : loggerName;
     }
+
+    // ======================== 结果类 ========================
 
     public static class LogQueryResult {
 

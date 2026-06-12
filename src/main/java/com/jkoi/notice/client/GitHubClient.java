@@ -4,12 +4,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jkoi.notice.config.GitHubProperties;
+import com.jkoi.notice.util.RestTemplateFactory;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.HttpClientErrorException;
@@ -23,9 +23,12 @@ import java.util.Base64;
 @Component
 public class GitHubClient {
 
+    private static final int MAX_RETRY_COUNT = 10;
+
     private final GitHubProperties properties;
     private final WeComWebhookClient weComWebhookClient;
     private final ObjectMapper objectMapper;
+    private final RestTemplate restTemplate;
 
     public GitHubClient(GitHubProperties properties,
                         WeComWebhookClient weComWebhookClient,
@@ -33,19 +36,21 @@ public class GitHubClient {
         this.properties = properties;
         this.weComWebhookClient = weComWebhookClient;
         this.objectMapper = objectMapper;
+        this.restTemplate = RestTemplateFactory.create(properties.getTimeoutMs());
     }
 
+    /**
+     * 带重试的内容获取，最多重试 MAX_RETRY_COUNT 次。
+     */
     public String fetch(int count) {
         try {
             return fetchContent().getContent();
         } catch (Exception e) {
-            if (count < 10) {
+            if (count < MAX_RETRY_COUNT) {
                 return fetch(count + 1);
-            } else {
-                weComWebhookClient.sendText("Failed to fetch GitHub content. Please check your GitHub token and API URL.");
             }
+            weComWebhookClient.sendText("Failed to fetch GitHub content. Please check your GitHub token and API URL.");
         }
-
         return "";
     }
 
@@ -75,11 +80,10 @@ public class GitHubClient {
                 body.put("branch", properties.getRef());
             }
 
-            RestTemplate restTemplate = createRestTemplate(properties.getTimeoutMs());
             restTemplate.exchange(
                     resolveApiUrl(false, filePath),
                     HttpMethod.PUT,
-                    new HttpEntity<String>(objectMapper.writeValueAsString(body), buildHeaders(MediaType.APPLICATION_JSON_VALUE)),
+                    new HttpEntity<>(objectMapper.writeValueAsString(body), buildHeaders(MediaType.APPLICATION_JSON_VALUE)),
                     String.class
             );
         } catch (Exception ex) {
@@ -91,6 +95,8 @@ public class GitHubClient {
         return StringUtils.hasText(properties.getToken()) && StringUtils.hasText(properties.getApiUrl());
     }
 
+    // ======================== 内部方法 ========================
+
     private String fetchCurrentSha(String filePath) {
         try {
             return fetchContent(filePath).getSha();
@@ -100,11 +106,10 @@ public class GitHubClient {
     }
 
     private String fetchRawContentApiResponse(String url) {
-        RestTemplate restTemplate = createRestTemplate(properties.getTimeoutMs());
         ResponseEntity<String> response = restTemplate.exchange(
                 url,
                 HttpMethod.GET,
-                new HttpEntity<String>(buildHeaders(null)),
+                new HttpEntity<>(buildHeaders(null)),
                 String.class
         );
         return response.getBody() == null ? "" : response.getBody();
@@ -206,12 +211,7 @@ public class GitHubClient {
         }
     }
 
-    private RestTemplate createRestTemplate(int timeoutMs) {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(timeoutMs);
-        factory.setReadTimeout(timeoutMs);
-        return new RestTemplate(factory);
-    }
+    // ======================== 内部类 ========================
 
     public static class GitHubFileContent {
         private final String content;

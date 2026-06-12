@@ -1,14 +1,14 @@
 package com.jkoi.notice.client;
 
-import com.jkoi.notice.config.WeComProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.springframework.http.ResponseEntity;
+import com.jkoi.notice.config.WeComProperties;
+import com.jkoi.notice.util.RestTemplateFactory;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestTemplate;
@@ -18,14 +18,15 @@ public class WeComWebhookClient {
 
     private final WeComProperties properties;
     private final ObjectMapper objectMapper;
+    private final RestTemplate restTemplate;
 
     public WeComWebhookClient(WeComProperties properties, ObjectMapper objectMapper) {
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.restTemplate = RestTemplateFactory.create(properties.getTimeoutMs());
     }
 
     public void sendText(String content) {
-        RestTemplate restTemplate = createRestTemplate(properties.getTimeoutMs());
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
 
@@ -36,7 +37,7 @@ public class WeComWebhookClient {
 
         ResponseEntity<String> response = restTemplate.postForEntity(
                 properties.getWebhookUrl(),
-                new HttpEntity<String>(body.toString(), headers),
+                new HttpEntity<>(body.toString(), headers),
                 String.class
         );
         assertSuccess(response.getBody());
@@ -44,13 +45,6 @@ public class WeComWebhookClient {
 
     public boolean isConfigured() {
         return StringUtils.hasText(properties.getWebhookUrl());
-    }
-
-    private RestTemplate createRestTemplate(int timeoutMs) {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(timeoutMs);
-        factory.setReadTimeout(timeoutMs);
-        return new RestTemplate(factory);
     }
 
     private void assertSuccess(String responseBody) {
@@ -66,7 +60,7 @@ public class WeComWebhookClient {
         } catch (IllegalStateException ex) {
             throw ex;
         } catch (Exception ignored) {
-            // Some proxies may not return JSON. HTTP success is enough in that case.
+            // 某些代理可能不返回 JSON，HTTP 成功即足够
         }
     }
 }

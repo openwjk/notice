@@ -12,14 +12,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/**
- * @author wangjunkai
- * @description
- * @date 2023/7/28 13:11
- */
 @Service
 @Slf4j
 public class ScheduledFactory {
+
     @Autowired
     private List<ScheduledService> scheduledServiceList;
 
@@ -37,19 +33,17 @@ public class ScheduledFactory {
     }
 
     public ScheduledService getScheduledService(String exeCode) {
-        ScheduledService indexCodeService = scheduledServiceMap.get(exeCode);
-        if (indexCodeService != null) {
-            return indexCodeService;
-        } else {
-            log.warn("ScheduledFactory.getScheduledService:null,origin code:{}", exeCode);
+        ScheduledService service = scheduledServiceMap.get(exeCode);
+        if (service == null) {
+            log.warn("ScheduledFactory.getScheduledService: null, origin code: {}", exeCode);
         }
-        return null;
+        return service;
     }
 
     public List<Map<String, Object>> listExecutionCodes() {
-        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
-        for (String code : scheduledServiceMap.keySet()) {
-            result.add(buildExecutionCode(code, scheduledServiceMap.get(code).getName()));
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map.Entry<String, ScheduledService> entry : scheduledServiceMap.entrySet()) {
+            result.add(buildExecutionCode(entry.getKey(), entry.getValue()));
         }
         return result;
     }
@@ -59,12 +53,12 @@ public class ScheduledFactory {
         return scheduledService == null ? "{}" : scheduledService.getSample();
     }
 
-    private Map<String, Object> buildExecutionCode(String code, String name) {
-        Map<String, Object> item = new LinkedHashMap<String, Object>();
+    private Map<String, Object> buildExecutionCode(String code, ScheduledService service) {
+        Map<String, Object> item = new LinkedHashMap<>();
         item.put("code", code);
-        item.put("name", name);
-        item.put("title", name);
-        item.put("sample", getExecutionCodeSample(code));
+        item.put("name", service.getName());
+        item.put("title", service.getName());
+        item.put("sample", service.getSample());
         return item;
     }
 }

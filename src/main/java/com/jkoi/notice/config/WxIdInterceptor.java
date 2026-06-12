@@ -1,6 +1,5 @@
 package com.jkoi.notice.config;
 
-import com.jkoi.notice.task.GitHubNoticeScheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -13,6 +12,7 @@ import java.io.IOException;
 
 @Component
 public class WxIdInterceptor implements HandlerInterceptor {
+
     private static final Logger log = LoggerFactory.getLogger(WxIdInterceptor.class);
 
     @Override
@@ -20,15 +20,20 @@ public class WxIdInterceptor implements HandlerInterceptor {
         if (isRootRequest(request)) {
             return true;
         }
+
         String wxid = request.getHeader("wxid");
         String xWxId = request.getHeader("X-Wx-Id");
         if (StringUtils.hasText(wxid) || StringUtils.hasText(xWxId)) {
             return true;
         }
-        if (System.getenv("JKOI_NOTICE_IGNORE_WXID") != null && System.getenv("JKOI_NOTICE_IGNORE_WXID").equals(wxid)) {
+
+        // 支持通过环境变量跳过 wxid 校验
+        String ignoreWxId = System.getenv("JKOI_NOTICE_IGNORE_WXID");
+        if ("true".equalsIgnoreCase(ignoreWxId)) {
             return true;
         }
-        log.warn("wxid is {}, request: {}", wxid, request.getRequestURI());
+
+        log.warn("Missing wxid header, request: {}", request.getRequestURI());
         writeEmptyResponse(response);
         return false;
     }
@@ -39,7 +44,7 @@ public class WxIdInterceptor implements HandlerInterceptor {
         String path = StringUtils.hasText(contextPath) && requestUri.startsWith(contextPath)
                 ? requestUri.substring(contextPath.length())
                 : requestUri;
-        return "/".equals(path) || "".equals(path);
+        return "/".equals(path) || path.isEmpty();
     }
 
     private void writeEmptyResponse(HttpServletResponse response) throws IOException {

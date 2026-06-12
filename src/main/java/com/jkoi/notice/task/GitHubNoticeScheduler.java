@@ -9,6 +9,8 @@ import com.jkoi.notice.model.ReminderStatRecord;
 import com.jkoi.notice.service.ReminderConfigService;
 import com.jkoi.notice.service.ScheduledFactory;
 import com.jkoi.notice.service.ScheduledService;
+import com.jkoi.notice.util.MetadataFields;
+import com.jkoi.notice.util.TextUtils;
 import org.quartz.CronExpression;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,7 +58,8 @@ public class GitHubNoticeScheduler {
     public void pollGitHubAndNotify() {
         LocalDateTime taskStartedAt = LocalDateTime.now().truncatedTo(ChronoUnit.MINUTES);
         PollResult pollResult = new PollResult();
-        log.info("Notice scheduler date:{}", taskStartedAt);
+        log.info("Notice scheduler date: {}", taskStartedAt);
+
         if (!noticeProperties.isEnabled()) {
             log.debug("Notice scheduler is disabled.");
             return;
@@ -69,6 +72,7 @@ public class GitHubNoticeScheduler {
         try {
             JsonNode root = loadReminderPayload();
             pollResult = collectMatchedData(root, taskStartedAt);
+
             if (pollResult.getContents().isEmpty()) {
                 if (pollResult.getMatchedCount() > 0) {
                     log.info("Matched workflow reminder executed at task start time {}.", taskStartedAt);
@@ -77,18 +81,19 @@ public class GitHubNoticeScheduler {
                 }
                 return;
             }
+
             for (ContentEntry entry : pollResult.getContents()) {
                 try {
-                    String truncatedContent = truncate(entry.getContent(), noticeProperties.getMaxContentLength());
+                    String truncatedContent = TextUtils.truncate(entry.getContent(), noticeProperties.getMaxContentLength());
                     weComWebhookClient.sendText(truncatedContent);
                     pollResult.addMatched(entry.getRecord());
                 } catch (Exception ex) {
-                    pollResult.addError(entry.getRecord(), "Send failed: " + shortMessage(ex));
+                    pollResult.addError(entry.getRecord(), "Send failed: " + TextUtils.shortMessage(ex));
                 }
             }
             log.info("WeCom text notification sent.");
         } catch (Exception ex) {
-            pollResult.addError(null, shortMessage(ex));
+            pollResult.addError(null, TextUtils.shortMessage(ex));
             log.error("Failed to poll GitHub or send WeCom notification.", ex);
         } finally {
             recordStats(pollResult);
@@ -99,7 +104,11 @@ public class GitHubNoticeScheduler {
         return reminderConfigService.exportSchedulerPayload();
     }
 
-    private Boolean isOuterTaskTimeMatched(String cron, LocalDateTime taskStartedAt) {
+    /**
+     * 判断 cron 表达式是否在指定时间命中。
+     * @return TRUE=命中, FALSE=未命中, NULL=表达式无效
+     */
+    private Boolean isCronMatched(String cron, LocalDateTime taskStartedAt) {
         if (!StringUtils.hasText(cron)) {
             return Boolean.TRUE;
         }
@@ -137,26 +146,11 @@ public class GitHubNoticeScheduler {
         java.util.Iterator<String> fieldNames = node.fieldNames();
         while (fieldNames.hasNext()) {
             String fieldName = fieldNames.next();
-            if (!isMetadataField(fieldName)) {
+            if (!MetadataFields.isMetadata(fieldName, noticeProperties)) {
                 return fieldName;
             }
         }
         return configuredDataField;
-    }
-
-    private boolean isMetadataField(String fieldName) {
-        return "id".equals(fieldName)
-                || "title".equals(fieldName)
-                || "type".equals(fieldName)
-                || "enabled".equals(fieldName)
-                || "deleted".equals(fieldName)
-                || "cron".equals(fieldName)
-                || "corn".equals(fieldName)
-                || fieldName.equals(noticeProperties.getCronField())
-                || "exeCode".equals(fieldName)
-                || "dataField".equals(fieldName)
-                || "fields".equals(fieldName)
-                || "updatedAt".equals(fieldName);
     }
 
     private PollResult collectMatchedData(JsonNode root, LocalDateTime taskStartedAt) throws Exception {
@@ -176,7 +170,10 @@ public class GitHubNoticeScheduler {
             if (item == null || item.isNull() || !item.isObject()) {
                 continue;
             }
+
             ReminderStatRecord record = buildRecord(item);
+
+            // 过滤已停用或已删除的项
             JsonNode enabledNode = item.get("enabled");
             if (enabledNode != null && !enabledNode.asBoolean(true)) {
                 continue;
@@ -186,8 +183,9 @@ public class GitHubNoticeScheduler {
                 continue;
             }
 
+            // 校验 Cron 表达式
             String cron = extractCron(item);
-            Boolean matched = isOuterTaskTimeMatched(cron, taskStartedAt);
+            Boolean matched = isCronMatched(cron, taskStartedAt);
             if (matched == null) {
                 result.addError(record, "Invalid cron: " + cron);
                 continue;
@@ -196,66 +194,57 @@ public class GitHubNoticeScheduler {
                 continue;
             }
 
+            // 执行工作流或发送文本
             JsonNode exeNode = item.get("exeCode");
             if (exeNode != null) {
-                String exeCode = exeNode.asText();
-                ZonedDateTime zdt = taskStartedAt.atZone(ZoneId.systemDefault());
-                Date date = Date.from(zdt.toInstant());
-                ScheduledService scheduledService = scheduledFactory.getScheduledService(exeCode);
-                if (scheduledService != null) {
-                    try {
-                        scheduledService.execute(date, item);
-                        result.addMatched(record);
-                    } catch (Exception ex) {
-                        result.addError(record, "Execution failed for " + exeCode + ": " + shortMessage(ex));
-                    }
-                } else {
-                    result.addError(record, "Unknown execution code: " + exeCode);
-                }
+                executeWorkflow(item, exeNode.asText(), taskStartedAt, record, result);
             } else {
-                String dataField = extractDataField(item);
-                JsonNode dataNode = item.get(dataField);
-                if ((dataNode == null || dataNode.isNull()) && !"data".equals(dataField)) {
-                    dataNode = item.get("data");
-                }
-                if (dataNode == null || dataNode.isNull()) {
-                    result.addError(record, "Missing reminder data field: " + dataField);
-                    continue;
-                }
-                if (dataNode.isTextual()) {
-                    result.addContent(dataNode.asText(), record);
-                } else {
-                    result.addContent(objectMapper.writeValueAsString(dataNode), record);
-                }
+                collectTextContent(item, record, result);
             }
         }
         return result;
     }
 
+    private void executeWorkflow(JsonNode item, String exeCode, LocalDateTime taskStartedAt,
+                                ReminderStatRecord record, PollResult result) {
+        ZonedDateTime zdt = taskStartedAt.atZone(ZoneId.systemDefault());
+        Date date = Date.from(zdt.toInstant());
+        ScheduledService scheduledService = scheduledFactory.getScheduledService(exeCode);
+        if (scheduledService != null) {
+            try {
+                scheduledService.execute(date, item);
+                result.addMatched(record);
+            } catch (Exception ex) {
+                result.addError(record, "Execution failed for " + exeCode + ": " + TextUtils.shortMessage(ex));
+            }
+        } else {
+            result.addError(record, "Unknown execution code: " + exeCode);
+        }
+    }
+
+    private void collectTextContent(JsonNode item, ReminderStatRecord record, PollResult result) throws Exception {
+        String dataField = extractDataField(item);
+        JsonNode dataNode = item.get(dataField);
+        if ((dataNode == null || dataNode.isNull()) && !"data".equals(dataField)) {
+            dataNode = item.get("data");
+        }
+        if (dataNode == null || dataNode.isNull()) {
+            result.addError(record, "Missing reminder data field: " + dataField);
+            return;
+        }
+        String content = dataNode.isTextual() ? dataNode.asText() : objectMapper.writeValueAsString(dataNode);
+        result.addContent(content, record);
+    }
+
     private ReminderStatRecord buildRecord(JsonNode item) {
         return new ReminderStatRecord(
-                textOf(item, "id"),
-                textOf(item, "title"),
-                textOf(item, "type"),
+                TextUtils.textOf(item, "id"),
+                TextUtils.textOf(item, "title"),
+                TextUtils.textOf(item, "type"),
                 extractCron(item),
-                textOf(item, "exeCode"),
+                TextUtils.textOf(item, "exeCode"),
                 ""
         );
-    }
-
-    private String textOf(JsonNode item, String fieldName) {
-        if (item == null || !StringUtils.hasText(fieldName)) {
-            return "";
-        }
-        JsonNode value = item.get(fieldName);
-        return value == null || value.isNull() ? "" : value.asText("").trim();
-    }
-
-    private String truncate(String value, int maxLength) {
-        if (maxLength <= 0 || value.length() <= maxLength) {
-            return value;
-        }
-        return value.substring(0, maxLength) + "\n...content truncated";
     }
 
     private void recordStats(PollResult result) {
@@ -273,18 +262,13 @@ public class GitHubNoticeScheduler {
         }
     }
 
-    private String shortMessage(Exception ex) {
-        if (ex == null) {
-            return "";
-        }
-        return StringUtils.hasText(ex.getMessage()) ? ex.getMessage() : ex.getClass().getSimpleName();
-    }
+    // ======================== 内部类 ========================
 
     private static class PollResult {
 
-        private final List<ContentEntry> contents = new ArrayList<ContentEntry>();
-        private final List<ReminderStatRecord> matchedRecords = new ArrayList<ReminderStatRecord>();
-        private final List<ReminderStatRecord> errorRecords = new ArrayList<ReminderStatRecord>();
+        private final List<ContentEntry> contents = new ArrayList<>();
+        private final List<ReminderStatRecord> matchedRecords = new ArrayList<>();
+        private final List<ReminderStatRecord> errorRecords = new ArrayList<>();
         private final StringBuilder errorMessage = new StringBuilder();
 
         private List<ContentEntry> getContents() {
@@ -293,10 +277,6 @@ public class GitHubNoticeScheduler {
 
         private int getMatchedCount() {
             return matchedRecords.size();
-        }
-
-        private int getErrorCount() {
-            return errorRecords.size();
         }
 
         private List<ReminderStatRecord> getMatchedRecords() {
@@ -323,13 +303,12 @@ public class GitHubNoticeScheduler {
             ReminderStatRecord nextRecord = record == null ? new ReminderStatRecord() : record;
             nextRecord.setMessage(message);
             errorRecords.add(nextRecord);
-            if (!StringUtils.hasText(message)) {
-                return;
+            if (StringUtils.hasText(message)) {
+                if (errorMessage.length() > 0) {
+                    errorMessage.append("; ");
+                }
+                errorMessage.append(message);
             }
-            if (errorMessage.length() > 0) {
-                errorMessage.append("; ");
-            }
-            errorMessage.append(message);
         }
 
         private boolean hasStatsChange() {
