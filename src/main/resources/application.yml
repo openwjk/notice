@@ -3,6 +3,10 @@ server:
 spring:
   application:
     name: notice
+  web:
+    resources:
+      static-locations: classpath:/static/
+      add-mappings: true
 
 notice:
   enabled: ${NOTICE_ENABLED:true}
@@ -24,12 +28,11 @@ wecom:
   webhook-url: ${WECOM_WEBHOOK_URL:}
   timeout-ms: ${WECOM_TIMEOUT_MS:10000}
 
-wechat:
-  app-id: ${WECHAT_APP_ID:}
-  secret: ${WECHAT_SECRET:}
-  session-url: ${WECHAT_SESSION_URL:https://api.weixin.qq.com/sns/jscode2session}
-  timeout-ms: ${WECHAT_TIMEOUT_MS:5000}
-  dev-fallback-enabled: ${WECHAT_DEV_FALLBACK_ENABLED:true}
+auth:
+  token-expire-hours: ${AUTH_TOKEN_EXPIRE_HOURS:24}
+  code-length: ${AUTH_CODE_LENGTH:6}
+  code-expire-minutes: ${AUTH_CODE_EXPIRE_MINUTES:5}
+  admin-key: ${AUTH_ADMIN_KEY:}
 
 festival:
   calendar-url: ${FESTIVAL_CALENDAR_URL:https://ical.muhan.org}
@@ -48,7 +51,6 @@ hk:
 notice-web:
   storage-path: ${NOTICE_WEB_STORAGE_PATH:data/reminders.json}
   stats-storage-path: ${NOTICE_WEB_STATS_STORAGE_PATH:data/reminder-stats.json}
-
 
 logging:
   charset:
